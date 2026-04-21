@@ -260,7 +260,8 @@
                 const arr = [];
                 const startLimit = new Date(TODAY_INDICATOR);
                 startLimit.setDate(TODAY_INDICATOR.getDate() - 7);
-                const endLimit = new Date(2026, 5, 30, 12, 0, 0);
+                const endLimit = new Date(TODAY_INDICATOR);
+                endLimit.setMonth(endLimit.getMonth() + 3);
                 let curr = new Date(startLimit);
                 while (curr <= endLimit) {
                     arr.push(new Date(curr));
