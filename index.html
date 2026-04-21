@@ -55,7 +55,24 @@
         // 核心配置
         const LOCKED_GAS_URL = "https://script.google.com/macros/s/AKfycbzT2YXUNxWbmpoJHm8lU7GuyN__eSrYkfFCSrM6Te3AlO0Lks9ds4z_1SUQpVbLYFyyvQ/exec"; 
         const EDIT_PASSWORD = "6669";
-        const TODAY_INDICATOR = new Date(2026, 3, 20, 12, 0, 0); // 2026-04-20
+        
+        // 以台灣時區 (GMT+8 / Asia/Taipei) 取得今日日期，避免受使用者本機時區影響。
+        const getTaiwanTodayNoon = () => {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Taipei',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).formatToParts(new Date());
+            let year = 1970, month = 1, day = 1;
+            for (const part of parts) {
+                if (part.type === 'year') year = parseInt(part.value, 10);
+                if (part.type === 'month') month = parseInt(part.value, 10);
+                if (part.type === 'day') day = parseInt(part.value, 10);
+            }
+            return new Date(year, month - 1, day, 12, 0, 0);
+        };
+        const TODAY_INDICATOR = getTaiwanTodayNoon();
         
         const TYPE_COLORS = {
             Development: { bg: "bg-yellow-400", border: "border-yellow-600", label: "Development" },
