@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monica NPI Project Chart</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 與 Babel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        
+        /* 強化版捲軸樣式 */
+        .custom-scrollbar::-webkit-scrollbar { 
+            width: 10px; 
+            height: 14px; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-track { 
+            background: #f8fafc; 
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb { 
+            background: #64748b; 
+            border-radius: 10px;
+            border: 3px solid #f8fafc;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { 
+            background: #3b82f6; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:active {
+            background: #1d4ed8;
+        }
+
+        input:focus, select:focus { border-color: #3b82f6; ring: 2px #3b82f6; outline: none; }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans text-[12px]">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+        
+        // 核心配置
+        const LOCKED_GAS_URL = "https://script.google.com/macros/s/AKfycbzT2YXUNxWbmpoJHm8lU7GuyN__eSrYkfFCSrM6Te3AlO0Lks9ds4z_1SUQpVbLYFyyvQ/exec"; 
+        const EDIT_PASSWORD = "6669";
+        const TODAY_INDICATOR = new Date(2026, 3, 20, 12, 0, 0); // 2026-04-20
+        
+        const TYPE_COLORS = {
+            Development: { bg: "bg-yellow-400", border: "border-yellow-600", label: "Development" },
+            PreGolden: { bg: "bg-blue-500", border: "border-blue-700", label: "Pre-golden (fine tune)" },
+            GoldenFPY: { bg: "bg-green-500", border: "border-green-700", label: "Golden FPY rack" }
+        };
+
+        const TYPE_MAPPER = {
+            "Dev": "Development", "Development": "Development",
+            "Fine tune": "PreGolden", "Tuning": "PreGolden", "Verification": "PreGolden", 
+            "Pre-golden (fine tune)": "PreGolden", "PreGolden": "PreGolden",
+            "FPY": "GoldenFPY", "Golden Run": "GoldenFPY", "Golden FPY rack": "GoldenFPY", "GoldenFPY": "GoldenFPY"
+        };
+
+        const DEFAULT_CATEGORIES = ['Gen10', 'Gen11', 'Gen12 AMD', 'Gen12 Intel'];
+        const DEFAULT_SITES = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
+        const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
+
+        const CATEGORY_TAG_STYLE = {
+            'Gen10': 'bg-slate-200 text-slate-700 border-slate-300',
+            'Gen11': 'bg-blue-100 text-blue-700 border-blue-200',
+            'Gen12 AMD': 'bg-red-100 text-red-700 border-red-200',
+            'Gen12 Intel': 'bg-cyan-100 text-cyan-700 border-cyan-200'
+        };
+
+        // --- SVG 圖標組件 ---
+        const Icon = ({ name, size = 16, className = "" }) => {
+            const icons = {
+                database: <g><path d="M3 5V19C3 20.1 5.24 21 8 21C10.76 21 13 20.1 13 19V5M3 5C3 6.1 5.24 7 8 7C10.76 7 13 6.1 13 5M3 5C3 3.9 5.24 3 8 3C10.76 3 13 3.9 13 5M13 12C13 13.1 15.24 14 18 14C20.76 14 23 13.1 23 12M13 12C13 10.9 15.24 10 18 10C20.76 10 23 10.9 23 12M13 12V19C13 20.1 15.24 21 18 21C20.76 21 23 20.1 23 19V12" /></g>,
+                lock: <g><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></g>,
+                key: <g><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3L15.5 7.5z"/></g>,
+                user: <g><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></g>,
+                "map-pin": <g><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></g>,
+                "chevron-down": <polyline points="6 9 12 15 18 9" />,
+                "chevron-right": <polyline points="9 18 15 12 9 6" />,
+                "folder-open": <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />,
+                "edit-2": <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />,
+                "refresh-cw": <g><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></g>,
+                plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
+                x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
+                spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>
+            };
+            return (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                    {icons[name]}
+                </svg>
+            );
+        };
+
+        // --- 輔助函數 ---
+        const formatText = (val) => {
+            if (val === null || val === undefined) return "";
+            if (typeof val === 'object') return "[Data]";
+            return String(val);
+        };
+
+        const formatDate = (dateStr) => String(dateStr || "").split('T')[0];
+
+        const isHoliday = (date) => {
+            if (!date) return false;
+            const d = date.getDay();
+            const m = date.getMonth();
+            const dayNum = date.getDate();
+            return (d === 0 || d === 6) || (m === 4 && dayNum === 1);
+        };
+
+        const dateToNum = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+
+        const strToNum = (s) => {
+            const p = String(s || "").split('T')[0].split('-');
+            if (p.length < 3) return 0;
+            return parseInt(p[0]) * 10000 + parseInt(p[1]) * 100 + parseInt(p[2]);
+        };
+
+        const FilterGroup = ({ label, options, selectedList, toggleFn, colorClass }) => (
+            <div className="flex items-center gap-2 font-sans">
+                <span className={`uppercase tracking-widest ${colorClass} shrink-0 font-bold text-[9px]`}>{label}</span>
+                <div className="flex bg-slate-900/40 p-0.5 rounded-lg gap-0.5 border border-slate-700/30">
+                    <button 
+                        onClick={() => toggleFn('All')} 
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-black transition-all ${selectedList.length === 0 ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                        All
+                    </button>
+                    {options.map(opt => (
+                        <button 
+                            key={opt} 
+                            onClick={() => toggleFn(opt)} 
+                            className={`px-2.5 py-0.5 rounded text-[10px] font-black transition-all border ${selectedList.includes(opt) ? 'bg-white text-slate-900 border-white shadow-sm' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
+                        >
+                            {opt}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const App = () => {
+            const [tasks, setTasks] = useState([]);
+            const [isEditMode, setIsEditMode] = useState(false);
+            const [syncStatus, setSyncStatus] = useState('connecting');
+            const [errorMsg, setErrorMsg] = useState(null);
+            
+            const [selectedCategories, setSelectedCategories] = useState([]);
+            const [selectedSites, setSelectedSites] = useState([]);
+            const [selectedPics, setSelectedPics] = useState([]);
+            const [collapsedCategories, setCollapsedCategories] = useState({});
+            const [showModal, setShowModal] = useState(false);
+            const [modalData, setModalData] = useState({ project: "", category: "Gen10", pic: "", site: "MX", phases: [] });
+            const [originalProjectName, setOriginalProjectName] = useState(null);
+
+            const [showAuthModal, setShowAuthModal] = useState(false);
+            const [passInput, setPassInput] = useState("");
+            const [authError, setAuthError] = useState(false);
+
+            const dynamicOptions = useMemo(() => {
+                const cats = new Set(DEFAULT_CATEGORIES);
+                const sites = new Set(DEFAULT_SITES);
+                const pics = new Set(DEFAULT_PICS);
+                tasks.forEach(t => {
+                    const c = formatText(t.category).trim(), s = formatText(t.site).trim(), p = formatText(t.pic).trim();
+                    if (c) cats.add(c);
+                    if (s) sites.add(s);
+                    if (p) p.split(/[/,，&]/).forEach(n => n.trim() && pics.add(n.trim()));
+                });
+                return { categories: Array.from(cats).sort(), sites: Array.from(sites).sort(), pics: Array.from(pics).sort() };
+            }, [tasks]);
+
+            const fetchFromSheets = async () => {
+                setSyncStatus('syncing');
+                try {
+                    const res = await fetch(LOCKED_GAS_URL + "?t=" + Date.now());
+                    const data = await res.json();
+                    if (Array.isArray(data)) {
+                        setTasks(data);
+                        setSyncStatus('synced');
+                        setErrorMsg(null);
+                    }
+                } catch (err) {
+                    setErrorMsg("雲端連線失敗。");
+                    setSyncStatus('error');
+                }
+            };
+
+            const handleSaveToCloud = async (updated) => {
+                setSyncStatus('syncing');
+                try {
+                    await fetch(LOCKED_GAS_URL, {
+                        method: 'POST', mode: 'no-cors',
+                        body: JSON.stringify(updated)
+                    });
+                    setTimeout(fetchFromSheets, 4000);
+                } catch (e) { setErrorMsg("存檔失敗。"); }
+            };
+
+            useEffect(() => { fetchFromSheets(); }, []);
+
+            const handleEditToggle = () => {
+                if (isEditMode) {
+                    setIsEditMode(false);
+                } else {
+                    setShowAuthModal(true);
+                    setAuthError(false);
+                    setPassInput("");
+                }
+            };
+
+            const handleVerifyPassword = () => {
+                if (passInput === EDIT_PASSWORD) {
+                    setIsEditMode(true);
+                    setShowAuthModal(false);
+                } else {
+                    setAuthError(true);
+                }
+            };
+
+            const handleFilterToggle = (list, setList, item) => {
+                if (item === 'All') setList([]);
+                else setList(prev => prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]);
+            };
+
+            const days = useMemo(() => {
+                const arr = [];
+                const startLimit = new Date(TODAY_INDICATOR);
+                startLimit.setDate(TODAY_INDICATOR.getDate() - 7);
+                const endLimit = new Date(2026, 5, 30, 12, 0, 0);
+                let curr = new Date(startLimit);
+                while (curr <= endLimit) {
+                    arr.push(new Date(curr));
+                    curr.setDate(curr.getDate() + 1);
+                }
+                return arr;
+            }, []);
+
+            const monthGroups = useMemo(() => {
+                const groups = [];
+                if (days.length === 0) return [];
+                let curM = days[0].getMonth(), count = 0, startIdx = 0;
+                days.forEach((day, i) => {
+                    if (day.getMonth() === curM) count++;
+                    else {
+                        groups.push({ month: curM, count, year: days[startIdx].getFullYear() });
+                        curM = day.getMonth(); count = 1; startIdx = i;
+                    }
+                });
+                groups.push({ month: curM, count, year: days[startIdx].getFullYear() });
+                return groups;
+            }, [days]);
+
+            const groupedData = useMemo(() => {
+                const filtered = tasks.filter(t => {
+                    const matchCat = selectedCategories.length === 0 || selectedCategories.includes(formatText(t.category));
+                    const hasSite = selectedSites.length > 0, hasPic = selectedPics.length > 0;
+                    let matchLoc = (hasSite ? selectedSites.includes(formatText(t.site)) : false) || 
+                                   (hasPic ? selectedPics.some(p => formatText(t.pic).toLowerCase().includes(p.toLowerCase())) : false);
+                    return matchCat && (!hasSite && !hasPic ? true : matchLoc);
+                });
+                const groups = {};
+                dynamicOptions.categories.forEach(c => groups[c] = {});
+                filtered.forEach(t => {
+                    const c = formatText(t.category || 'Gen10'), p = formatText(t.project || 'Unknown');
+                    if (!groups[c]) groups[c] = {};
+                    if (!groups[c][p]) groups[c][p] = [];
+                    groups[c][p].push(t);
+                });
+                const result = [];
+                dynamicOptions.categories.forEach(c => {
+                    const ps = Object.entries(groups[c]).filter(e => e[1].length > 0).sort((a,b) => new Date(a[1][0].start) - new Date(b[1][0].start));
+                    if (ps.length > 0) result.push({ category: c, projects: ps });
+                });
+                return result;
+            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions]);
+
+            return (
+                <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
+                    {/* Header */}
+                    <div className="bg-slate-900 text-white px-4 py-2 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-md">
+                        <div className="flex items-center gap-3">
+                            <div className={`p-1.5 rounded-md ${syncStatus === 'synced' ? 'bg-green-600' : 'bg-orange-500 animate-pulse'}`}>
+                                <Icon name="database" size={16} />
+                            </div>
+                            <div className="flex items-baseline gap-2 text-left font-black">
+                                <h1 className="text-base font-black tracking-tighter uppercase underline decoration-green-500 underline-offset-4">Monica NPI Project Chart</h1>
+                                <span className="text-[10px] text-slate-400 font-black italic tracking-widest">@Dixon Chu</span>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                            <button onClick={handleEditToggle} className={`px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg ${isEditMode ? 'bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20' : 'bg-slate-700 border-slate-600 hover:bg-slate-600'}`}>
+                                {isEditMode ? <><Icon name="x" size={12} className="inline mr-1" /> FINISH</> : <><Icon name="lock" size={12} className="inline mr-1" /> OPEN EDIT MODE</>}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Filters & Legend */}
+                    <div className="bg-slate-800 border-b border-slate-700 px-4 py-1.5 space-y-1.5 shrink-0 text-[10px] font-black text-slate-300">
+                        <FilterGroup label="GEN" options={dynamicOptions.categories} selectedList={selectedCategories} toggleFn={(i)=>handleFilterToggle(selectedCategories, setSelectedCategories, i)} colorClass="text-indigo-400" />
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-700/50 pt-1.5 font-black">
+                            <FilterGroup label="SITE" options={dynamicOptions.sites} selectedList={selectedSites} toggleFn={(i)=>handleFilterToggle(selectedSites, setSelectedSites, i)} colorClass="text-blue-400" />
+                            <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
+                        </div>
+                        <div className="flex flex-wrap gap-4 pt-1.5 border-t border-slate-700/30 text-gray-300 font-black uppercase">
+                            {Object.entries(TYPE_COLORS).map(([key, info]) => (
+                                <div key={key} className="flex items-center gap-1 font-black">
+                                    <div className={`w-2.5 h-2.5 rounded-sm ${info.bg} border ${info.border}`}></div> 
+                                    <span className="uppercase tracking-tighter opacity-80">{info.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* New Project Control */}
+                    {isEditMode && (
+                        <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex justify-end shrink-0 z-[400]">
+                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: "Gen10", pic: "", site: "MX", phases: [{ localId: Date.now(), task: "", type: "Development", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
+                                <Icon name="plus" size={14} className="inline mr-1" /> New Project
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Gantt Area */}
+                    <div className="flex-1 overflow-auto custom-scrollbar relative bg-white pb-32 isolate">
+                        <table className="w-full border-collapse table-fixed min-w-[1600px] text-left text-[12px]">
+                            <thead className="sticky top-0 z-[300] shadow-sm font-sans bg-white">
+                                <tr className="bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest border-b border-slate-700">
+                                    <th className="w-72 sticky left-0 z-[450] bg-slate-900 border-r border-slate-700 px-4 py-2 font-black font-sans uppercase">Timeline Scope</th>
+                                    {monthGroups.map((group, idx) => (
+                                        <th key={idx} colSpan={group.count} className="px-2 border-r border-slate-700 text-center bg-slate-800 uppercase font-black font-sans">
+                                            {new Date(group.year, group.month).toLocaleString('en-US', { month: 'long', year: 'numeric' }).toUpperCase()}
+                                        </th>
+                                    ))}
+                                </tr>
+                                <tr className="bg-white border-b border-gray-300 font-sans">
+                                    <th className="w-72 sticky left-0 z-[450] bg-slate-100 border-r border-gray-300 h-8 font-black text-[9px] text-slate-500 px-4 uppercase tracking-tighter font-black font-sans">Project Portfolio</th>
+                                    {days.map((day, i) => {
+                                        const dateNum = dateToNum(day);
+                                        const holiday = isHoliday(day);
+                                        const isToday = dateNum === dateToNum(TODAY_INDICATOR);
+                                        return (
+                                            <th key={i} className={`w-8 h-8 border-r border-gray-200 text-[9px] py-1 font-mono text-center ${holiday ? 'bg-slate-200 text-red-500 font-black' : 'text-slate-500'} ${isToday ? 'bg-red-50 text-red-600 border-x-red-400 font-black' : ''}`}>
+                                                {day.getDate()}
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 relative">
+                                {groupedData.map(group => {
+                                    const isCollapsed = collapsedCategories[group.category];
+                                    return (
+                                        <React.Fragment key={group.category}>
+                                            <tr className="bg-slate-50/80 border-y border-slate-200 cursor-pointer hover:bg-slate-100 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedCategories(prev => ({...prev, [group.category]: !isCollapsed}))}>
+                                                <td className="sticky left-0 z-[50] bg-slate-50 px-3 py-1 font-black text-[11px] text-slate-700 flex items-center gap-2 shadow-sm border-r border-slate-200">
+                                                    <Icon name={isCollapsed ? "chevron-right" : "chevron-down"} size={12} />
+                                                    <Icon name="folder-open" size={12} className="ml-1 text-blue-500" />
+                                                    <span className="ml-1 font-black uppercase">{group.category}</span>
+                                                    <span className="ml-2 text-[8px] px-2 py-0.5 bg-white rounded-full border border-slate-300 text-slate-500 font-bold">{group.projects.length} Items</span>
+                                                </td>
+                                                <td colSpan={days.length}></td>
+                                            </tr>
+                                            {!isCollapsed && group.projects.map(([projName, phases]) => (
+                                                <tr key={projName} className="hover:bg-blue-50/10 group/row relative transition-colors hover:z-[200]">
+                                                    <td onClick={() => {if(isEditMode) {
+                                                        setOriginalProjectName(projName);
+                                                        setModalData({ project: projName, category: phases[0].category, pic: phases[0].pic, site: phases[0].site, phases: phases.map((p,idx)=>({...p, localId: Date.now()+idx})) });
+                                                        setShowModal(true);
+                                                    }}} className={`w-72 sticky left-0 z-[50] bg-white border-r border-gray-300 py-1 px-4 shadow-sm group-hover/row:bg-blue-50 ${isEditMode ? 'cursor-pointer border-l-4 border-l-orange-500 transition-all' : ''}`}>
+                                                        <div className="flex flex-col gap-0.5 text-left font-black font-sans">
+                                                            <div className="flex items-center justify-between font-black font-sans"><span className="text-[11px] text-gray-900 truncate uppercase tracking-tight">{projName}</span>{isEditMode && <Icon name="edit-2" size={10} className="text-orange-500" />}</div>
+                                                            <div className="flex items-center gap-1.5 flex-wrap font-black font-sans">
+                                                                <span className={`px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border ${CATEGORY_TAG_STYLE[group.category]}`}>{group.category}</span>
+                                                                <div className="flex items-center gap-1 text-blue-700 font-black text-[8px] bg-blue-50 px-1 rounded-sm"><Icon name="user" size={8} /> {formatText(phases[0].pic)}</div>
+                                                                <div className="flex items-center gap-1 text-slate-500 font-black text-[8px] bg-slate-100 px-1 rounded-sm border border-slate-200"><Icon name="map-pin" size={8} /> {formatText(phases[0].site)}</div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    {days.map((day, i) => {
+                                                        const dateNum = dateToNum(day);
+                                                        const active = phases.find(t => dateNum >= strToNum(t.start) && dateNum <= strToNum(t.end));
+                                                        const holiday = isHoliday(day);
+                                                        const isToday = dateNum === dateToNum(TODAY_INDICATOR);
+                                                        const typeKey = active ? (TYPE_MAPPER[formatText(active.type)] || "Development") : "";
+                                                        const color = TYPE_COLORS[typeKey] || TYPE_COLORS.Development;
+
+                                                        return (
+                                                            <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-100/40' : ''} ${isToday ? 'bg-red-50/10' : ''}`}>
+                                                                {active && (
+                                                                    <div className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} ${color.bg} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10`}>
+                                                                        <div className="absolute hidden group-hover/cell:flex flex-col top-[110%] left-1/2 -translate-x-1/2 w-80 bg-slate-950 text-white p-3 rounded-lg shadow-2xl text-[10px] z-[9999] border border-slate-700 ring-4 ring-black/10 pointer-events-none font-sans">
+                                                                            <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-2 font-black">
+                                                                                <p className="font-black text-green-400 uppercase leading-none font-black">{color.label}</p>
+                                                                                <p className="font-mono text-[9px] text-amber-400 font-bold leading-none whitespace-nowrap uppercase">
+                                                                                    {formatDate(active.start)} ~ {formatDate(active.end)}
+                                                                                </p>
+                                                                            </div>
+                                                                            <p className="opacity-100 font-semibold mb-1 break-words leading-relaxed font-black font-sans">{formatText(active.task)}</p>
+                                                                            <p className="pt-1 border-t border-slate-800 text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate">{projName}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {isToday && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-red-600 z-10 opacity-60 shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div>}
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-white border-t border-gray-200 px-4 py-2 text-[9px] flex justify-between items-center font-bold uppercase shrink-0">
+                        <div className="flex items-center gap-2 text-slate-400 font-black">
+                             <Icon name="spreadsheet" size={12} className="inline" /> 
+                             <span>Cloud Storage Active</span>
+                        </div>
+                        <span className="text-slate-300 font-black italic">Persistent Matrix Link</span>
+                    </div>
+
+                    {/* Password Modal */}
+                    {showAuthModal && (
+                        <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 p-8 text-center space-y-6">
+                                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto font-black">
+                                    <Icon name="key" size={32} />
+                                </div>
+                                <div className="font-black">
+                                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Security Access</h3>
+                                    <p className="text-slate-500 text-[11px] mt-1 font-bold">Please enter passcode to enable Edit Mode.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <input 
+                                        type="password" 
+                                        value={passInput}
+                                        autoFocus
+                                        onChange={(e)=>setPassInput(e.target.value)}
+                                        onKeyDown={(e)=> e.key === 'Enter' && handleVerifyPassword()}
+                                        placeholder="••••"
+                                        className={`w-full px-4 py-3 bg-slate-50 border-2 rounded-xl text-center text-2xl font-mono tracking-[1em] outline-none transition-all ${authError ? 'border-red-500 animate-shake' : 'border-slate-100 focus:border-blue-500'}`}
+                                    />
+                                    {authError && <p className="text-red-500 text-[10px] font-bold uppercase tracking-tight font-black">Invalid Passcode.</p>}
+                                </div>
+                                <div className="flex gap-3 pt-2 font-black font-sans">
+                                    <button onClick={()=>setShowAuthModal(false)} className="flex-1 px-4 py-2.5 text-slate-400 font-bold hover:bg-slate-50 rounded-xl transition-all uppercase text-[11px] font-black">Cancel</button>
+                                    <button onClick={handleVerifyPassword} className="flex-1 px-4 py-2.5 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 transition-all uppercase text-[11px] shadow-lg shadow-blue-500/20 font-black">Verify</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Edit Modal */}
+                    {showModal && (
+                        <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 overflow-y-auto font-sans font-black">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 text-left font-black font-sans font-black">
+                                <div className="bg-slate-900 px-6 py-4 flex justify-between items-center text-white">
+                                    <h2 className="font-black uppercase tracking-widest text-sm font-black font-sans">{originalProjectName ? 'Update' : 'New'} Project</h2>
+                                    <button onClick={()=>setShowModal(false)} className="hover:text-red-400 transition-all font-black font-sans font-black"><Icon name="x" size={20}/></button>
+                                </div>
+                                <div className="p-6 space-y-4 font-black font-sans font-black">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-4 border-b border-slate-100 font-black">
+                                        <div className="col-span-2 md:col-span-1 font-black">
+                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 font-black">Project Name</label>
+                                            <input value={modalData.project} onChange={e=>setModalData({...modalData, project: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-black text-blue-600 outline-none focus:ring-1 focus:ring-blue-500 font-black font-sans font-black" />
+                                        </div>
+                                        <div className="font-black">
+                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 underline decoration-blue-400 font-black">Gen</label>
+                                            <select value={modalData.category} onChange={e=>setModalData({...modalData, category: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-black outline-none font-black font-sans">
+                                                {dynamicOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="font-black">
+                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 font-black">PIC</label>
+                                            <input value={modalData.pic} onChange={e=>setModalData({...modalData, pic: e.target.value})} placeholder="例如: Sherry/Nick" className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-bold outline-none focus:ring-1 focus:ring-blue-500 font-black font-sans" />
+                                        </div>
+                                        <div className="font-black">
+                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 font-black">Site</label>
+                                            <select value={modalData.site} onChange={e=>setModalData({...modalData, site: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-bold outline-none font-black font-sans font-black">
+                                                {dynamicOptions.sites.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between items-center text-[11px] font-black uppercase text-slate-700 font-black font-sans font-black">
+                                        <span className="font-black">Milestones Planning</span>
+                                        <button onClick={()=>setModalData({...modalData, phases: [...modalData.phases, {localId: Date.now(), task:"", type:"Development", start: formatDate(new Date()), end: formatDate(new Date())}]})} className="text-blue-600 bg-blue-50 px-3 py-1 rounded border hover:bg-blue-100 font-bold font-black font-black font-black font-black font-black">+ Add Phase</button>
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto space-y-3 custom-scrollbar pr-1 font-black">
+                                        {modalData.phases.map(phase => (
+                                            <div key={phase.localId} className="flex items-end gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200 font-black">
+                                                <div className="flex-1 grid grid-cols-2 gap-3 font-black">
+                                                    <div className="col-span-1 font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Task Description</label><input value={phase.task} onChange={e=>setModalData({...modalData, phases: modalData.phases.map(p=>p.localId===phase.localId?{...p, task: e.target.value}:p)})} className="w-full px-2 py-1 text-[11px] border rounded font-black outline-none focus:border-blue-500 font-black font-sans" /></div>
+                                                    <div className="col-span-1 font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Phase Type</label>
+                                                        <div className="flex flex-wrap gap-1 font-black font-black font-black font-black">
+                                                            {/* 修復：恢復完整敘述與對應顏色按鈕 */}
+                                                            {Object.entries(TYPE_COLORS).map(([key, info]) => (
+                                                                <button 
+                                                                    key={key} 
+                                                                    onClick={() => setModalData({...modalData, phases: modalData.phases.map(p => p.localId === phase.localId ? {...p, type: key} : p)})} 
+                                                                    className={`px-2 py-1 rounded text-[8px] font-black border transition-all font-black font-black font-black ${phase.type === key ? `${info.bg} text-white border-transparent shadow-sm ring-1 ring-slate-400` : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                                                >
+                                                                    {info.label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <div className="font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Start Date</label><input type="date" value={formatDate(phase.start)} onChange={e=>setModalData({...modalData, phases: modalData.phases.map(p=>p.localId===phase.localId?{...p, start: e.target.value}:p)})} className="w-full px-2 py-1 text-[11px] border rounded font-mono outline-none font-black font-sans font-black font-black font-black font-black" /></div>
+                                                    <div className="font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">End Date</label><input type="date" value={formatDate(phase.end)} onChange={e=>setModalData({...modalData, phases: modalData.phases.map(p=>p.localId===phase.localId?{...p, end: e.target.value}:p)})} className="w-full px-2 py-1 text-[11px] border rounded font-mono outline-none font-black font-sans font-black font-black font-black font-black" /></div>
+                                                </div>
+                                                <button onClick={()=>setModalData({...modalData, phases: modalData.phases.filter(p=>p.localId!==phase.localId)})} className="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded transition-all font-black font-sans font-black font-black font-black font-black font-black font-black"><Icon name="x" size={16}/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-4 pt-4 border-t font-black font-black font-black font-black font-black font-black font-black">
+                                        {originalProjectName && <button onClick={()=>{if(window.confirm('確定刪除專案？')){const updated=tasks.filter(t=>formatText(t.project)!==originalProjectName); setTasks(updated); handleSaveToCloud(updated); setShowModal(false);}}} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg font-black uppercase text-[10px] font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black">Delete Project</button>}
+                                        <button onClick={()=>setShowModal(false)} className="px-5 py-2 text-slate-500 font-black ml-auto uppercase text-[10px] font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black">Cancel</button>
+                                        <button onClick={()=>{
+                                            let newTasks = [...tasks];
+                                            if(originalProjectName) newTasks = newTasks.filter(t=>formatText(t.project)!==originalProjectName);
+                                            const push = modalData.phases.map(p=>({project: modalData.project, category: modalData.category, pic: modalData.pic, site: modalData.site, task: p.task, type: p.type, start: p.start, end: p.end}));
+                                            const final = [...newTasks, ...push];
+                                            setTasks(final);
+                                            handleSaveToCloud(final);
+                                            setShowModal(false);
+                                        }} className="px-10 py-2 bg-slate-900 text-white rounded-lg font-black uppercase text-[10px] shadow-lg hover:bg-slate-800 transition-all font-black font-sans font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black">Sync Update</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
