@@ -98,10 +98,10 @@
         const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
 
         const CATEGORY_TAG_STYLE = {
-            'Gen10': 'bg-slate-200 text-slate-700 border-slate-300',
-            'Gen11': 'bg-blue-100 text-blue-700 border-blue-200',
-            'Gen12 AMD': 'bg-red-100 text-red-700 border-red-200',
-            'Gen12 Intel': 'bg-cyan-100 text-cyan-700 border-cyan-200'
+            'Gen10': 'bg-slate-300 text-slate-800 border-slate-400',
+            'Gen11': 'bg-blue-200 text-blue-800 border-blue-300',
+            'Gen12 AMD': 'bg-red-200 text-red-800 border-red-300',
+            'Gen12 Intel': 'bg-cyan-200 text-cyan-800 border-cyan-300'
         };
 
         // --- SVG icon component ---
@@ -438,8 +438,8 @@
                                     const isCollapsed = collapsedCategories[group.category];
                                     return (
                                         <React.Fragment key={group.category}>
-                                            <tr className="bg-slate-50/80 border-y border-slate-200 cursor-pointer hover:bg-slate-100 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedCategories(prev => ({...prev, [group.category]: !isCollapsed}))}>
-                                                <td className="sticky left-0 z-[50] bg-slate-50 px-3 py-1 font-black text-[11px] text-slate-700 flex items-center gap-2 shadow-sm border-r border-slate-200">
+                                            <tr className="bg-slate-100 border-y border-slate-300 cursor-pointer hover:bg-slate-200/80 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedCategories(prev => ({...prev, [group.category]: !isCollapsed}))}>
+                                                <td className="sticky left-0 z-[50] bg-slate-100 px-3 py-1 font-black text-[11px] text-slate-800 flex items-center gap-2 shadow-[4px_0_8px_rgba(15,23,42,0.08)] border-r-2 border-slate-300">
                                                     <Icon name={isCollapsed ? "chevron-right" : "chevron-down"} size={12} />
                                                     <Icon name="folder-open" size={12} className="ml-1 text-blue-500" />
                                                     <span className="ml-1 font-black uppercase">{group.category}</span>
@@ -447,19 +447,19 @@
                                                 </td>
                                                 <td colSpan={days.length}></td>
                                             </tr>
-                                            {!isCollapsed && group.projects.map(([projName, phases]) => (
-                                                <tr key={projName} className="hover:bg-blue-50/10 group/row relative transition-colors hover:z-[200]">
+                                            {!isCollapsed && group.projects.map(([projName, phases], projIdx) => (
+                                                <tr key={projName} className={`group/row relative transition-colors hover:bg-sky-50 hover:z-[200] ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
                                                     <td onClick={() => {if(isEditMode) {
                                                         setOriginalProjectName(projName);
                                                         setModalData({ project: projName, category: phases[0].category, pic: phases[0].pic, site: phases[0].site, phases: phases.map((p,idx)=>({...p, type: normalizeTypeKey(p.type), localId: Date.now()+idx})) });
                                                         setShowModal(true);
-                                                    }}} className={`w-72 sticky left-0 z-[50] bg-white border-r border-gray-300 py-1 px-4 shadow-sm group-hover/row:bg-blue-50 ${isEditMode ? 'cursor-pointer border-l-4 border-l-orange-500 transition-all' : ''}`}>
+                                                    }}} className={`w-72 sticky left-0 z-[50] border-r-2 border-gray-300 py-1 px-4 shadow-[4px_0_8px_rgba(15,23,42,0.08)] group-hover/row:bg-sky-100 ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/80'} ${isEditMode ? 'cursor-pointer border-l-4 border-l-orange-500 transition-all' : ''}`}>
                                                         <div className="flex flex-col gap-0.5 text-left font-black font-sans">
                                                             <div className="flex items-center justify-between font-black font-sans"><span className="text-[11px] text-gray-900 truncate uppercase tracking-tight">{projName}</span>{isEditMode && <Icon name="edit-2" size={10} className="text-orange-500" />}</div>
                                                             <div className="flex items-center gap-1.5 flex-wrap font-black font-sans">
                                                                 <span className={`px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border ${CATEGORY_TAG_STYLE[group.category]}`}>{group.category}</span>
-                                                                <div className="flex items-center gap-1 text-blue-700 font-black text-[8px] bg-blue-50 px-1 rounded-sm"><Icon name="user" size={8} /> {formatText(phases[0].pic)}</div>
-                                                                <div className="flex items-center gap-1 text-slate-500 font-black text-[8px] bg-slate-100 px-1 rounded-sm border border-slate-200"><Icon name="map-pin" size={8} /> {formatText(phases[0].site)}</div>
+                                                                <div className="flex items-center gap-1 text-blue-800 font-black text-[8px] bg-blue-100 px-1 rounded-sm border border-blue-200"><Icon name="user" size={8} /> {formatText(phases[0].pic)}</div>
+                                                                <div className="flex items-center gap-1 text-slate-700 font-black text-[8px] bg-slate-200 px-1 rounded-sm border border-slate-300"><Icon name="map-pin" size={8} /> {formatText(phases[0].site)}</div>
                                                             </div>
                                                         </div>
                                                     </td>
@@ -476,7 +476,7 @@
                                                             resourceOverloadSet.has(`${group.category}|${dateNum}`);
 
                                                         return (
-                                                            <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-100/40' : ''} ${isToday ? 'bg-red-50/10' : ''}`}>
+                                                            <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-200/50' : ''} ${isToday ? 'bg-red-100/30' : ''}`}>
                                                                 {active && (
                                                                     <div className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} ${color.bg} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10 ${isResourceOverloaded ? 'ring-2 ring-red-600 ring-offset-0 border border-red-700' : ''}`}>
                                                                         <div className="absolute hidden group-hover/cell:flex flex-col top-[110%] left-1/2 -translate-x-1/2 w-80 bg-slate-950 text-white p-3 rounded-lg shadow-2xl text-[10px] z-[9999] border border-slate-700 ring-4 ring-black/10 pointer-events-none font-sans">
