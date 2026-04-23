@@ -336,6 +336,7 @@
 
                 groupedData.forEach(group => {
                     days.forEach(day => {
+                        if (isHoliday(day)) return;
                         const dateNum = dateToNum(day);
                         let activeDevProjectCount = 0;
 
