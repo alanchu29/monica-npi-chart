@@ -194,6 +194,7 @@
         const App = () => {
             const [tasks, setTasks] = useState([]);
             const [isEditMode, setIsEditMode] = useState(false);
+            const [isResourceCheckEnabled, setIsResourceCheckEnabled] = useState(false);
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [errorMsg, setErrorMsg] = useState(null);
             
@@ -328,6 +329,32 @@
                 return result;
             }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions]);
 
+            const resourceOverloadSet = useMemo(() => {
+                const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
+                const overloaded = new Set();
+
+                groupedData.forEach(group => {
+                    days.forEach(day => {
+                        const dateNum = dateToNum(day);
+                        let activeDevProjectCount = 0;
+
+                        group.projects.forEach(([, phases]) => {
+                            const hasActiveDevPhase = phases.some(phase => {
+                                const phaseType = normalizeTypeKey(phase.type);
+                                return trackedTypes.has(phaseType) && dateNum >= strToNum(phase.start) && dateNum <= strToNum(phase.end);
+                            });
+                            if (hasActiveDevPhase) activeDevProjectCount += 1;
+                        });
+
+                        if (activeDevProjectCount > 2) {
+                            overloaded.add(`${group.category}|${dateNum}`);
+                        }
+                    });
+                });
+
+                return overloaded;
+            }, [groupedData, days]);
+
             return (
                 <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
                     {/* Header */}
@@ -342,6 +369,12 @@
                             </div>
                         </div>
                         <div className="flex gap-2 items-center">
+                            <button
+                                onClick={() => setIsResourceCheckEnabled(prev => !prev)}
+                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight ${isResourceCheckEnabled ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-700 border-slate-600 hover:bg-slate-600'}`}
+                            >
+                                Resource Check: {isResourceCheckEnabled ? 'ON' : 'OFF'}
+                            </button>
                             <button onClick={handleEditToggle} className={`px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg ${isEditMode ? 'bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20' : 'bg-slate-700 border-slate-600 hover:bg-slate-600'}`}>
                                 {isEditMode ? <><Icon name="x" size={12} className="inline mr-1" /> FINISH</> : <><Icon name="lock" size={12} className="inline mr-1" /> OPEN EDIT MODE</>}
                             </button>
@@ -437,11 +470,15 @@
                                                         const isToday = dateNum === dateToNum(TODAY_INDICATOR);
                                                         const typeKey = active ? normalizeTypeKey(active.type) : "";
                                                         const color = TYPE_COLORS[typeKey] || TYPE_COLORS.DevelopmentTNRS;
+                                                        const isResourceOverloaded = isResourceCheckEnabled &&
+                                                            active &&
+                                                            (typeKey === "DevelopmentTNRS" || typeKey === "DevelopmentPI") &&
+                                                            resourceOverloadSet.has(`${group.category}|${dateNum}`);
 
                                                         return (
                                                             <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-100/40' : ''} ${isToday ? 'bg-red-50/10' : ''}`}>
                                                                 {active && (
-                                                                    <div className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} ${color.bg} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10`}>
+                                                                    <div className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} ${color.bg} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10 ${isResourceOverloaded ? 'ring-2 ring-red-600 ring-offset-0 border border-red-700' : ''}`}>
                                                                         <div className="absolute hidden group-hover/cell:flex flex-col top-[110%] left-1/2 -translate-x-1/2 w-80 bg-slate-950 text-white p-3 rounded-lg shadow-2xl text-[10px] z-[9999] border border-slate-700 ring-4 ring-black/10 pointer-events-none font-sans">
                                                                             <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-2 font-black">
                                                                                 <p className="font-black text-green-400 uppercase leading-none font-black">{color.label}</p>
