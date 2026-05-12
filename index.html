@@ -51,13 +51,43 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useMemo, useEffect } = React;
-        
-        // Core configuration
-        const LOCKED_GAS_URL = "https://script.google.com/macros/s/AKfycbzT2YXUNxWbmpoJHm8lU7GuyN__eSrYkfFCSrM6Te3AlO0Lks9ds4z_1SUQpVbLYFyyvQ/exec"; 
-        const EDIT_PASSWORD = "6669";
-        
-        // Use Taiwan timezone (GMT+8 / Asia/Taipei) for "today".
+        const { useState, useMemo, useEffect, useCallback } = React;
+
+        const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbzT2YXUNxWbmpoJHm8lU7GuyN__eSrYkfFCSrM6Te3AlO0Lks9ds4z_1SUQpVbLYFyyvQ/exec";
+        const GAS_URL_STORAGE_KEY = "monica-npi-gas-webapp-url";
+
+        const readInitialGasUrl = () => {
+            try {
+                const q = new URLSearchParams(window.location.search).get("gas");
+                if (q) {
+                    const decoded = decodeURIComponent(q.trim());
+                    if (decoded) {
+                        try { localStorage.setItem(GAS_URL_STORAGE_KEY, decoded); } catch (e) { /* ignore */ }
+                        return decoded;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                const stored = localStorage.getItem(GAS_URL_STORAGE_KEY);
+                if (stored && stored.trim()) return stored.trim();
+            } catch (e) { /* ignore */ }
+            return DEFAULT_GAS_URL;
+        };
+
+        const normalizeGasUrl = (raw) => {
+            let s = String(raw || "").trim();
+            if (!s) return "";
+            if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+            return s.replace(/\/+$/, "");
+        };
+
+        const isLikelyGasWebAppUrl = (url) =>
+            /script\.google\.com\/macros\/s\//i.test(url) && /\/exec$/i.test(url);
+
+        const DEFAULT_EDIT_PASSWORD = "6669";
+        const ADMIN_PREFS_STORAGE_KEY = "monica-npi-admin-prefs";
+
+        // Use Taiwan timezone (GMT+8 / Asia/Taipei) for default "today" anchor.
         const getTaiwanTodayNoon = () => {
             const parts = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Taipei',
@@ -73,7 +103,46 @@
             }
             return new Date(year, month - 1, day, 12, 0, 0);
         };
-        const TODAY_INDICATOR = getTaiwanTodayNoon();
+
+        const dateAtNoonFromYMD = (ymd) => {
+            const p = String(ymd || "").split('T')[0].split('-');
+            if (p.length < 3) return getTaiwanTodayNoon();
+            const y = parseInt(p[0], 10), m = parseInt(p[1], 10), d = parseInt(p[2], 10);
+            if (!y || !m || !d) return getTaiwanTodayNoon();
+            return new Date(y, m - 1, d, 12, 0, 0);
+        };
+
+        const parseLinesOrCommas = (text) =>
+            String(text || "")
+                .split(/[,，\n\r]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+
+        const readInitialAdminPrefs = () => {
+            const fallback = {
+                editPassword: DEFAULT_EDIT_PASSWORD,
+                defaultCategories: [...DEFAULT_CATEGORIES],
+                defaultSites: [...DEFAULT_SITES],
+                defaultPics: [...DEFAULT_PICS],
+                timelineYmd: null,
+                resourceCheckEnabled: false
+            };
+            try {
+                const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
+                if (!raw) return fallback;
+                const p = JSON.parse(raw);
+                return {
+                    editPassword: typeof p.editPassword === "string" && p.editPassword.trim() ? p.editPassword.trim() : fallback.editPassword,
+                    defaultCategories: Array.isArray(p.defaultCategories) && p.defaultCategories.length ? p.defaultCategories.map(String) : fallback.defaultCategories,
+                    defaultSites: Array.isArray(p.defaultSites) && p.defaultSites.length ? p.defaultSites.map(String) : fallback.defaultSites,
+                    defaultPics: Array.isArray(p.defaultPics) && p.defaultPics.length ? p.defaultPics.map(String) : fallback.defaultPics,
+                    timelineYmd: typeof p.timelineYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.timelineYmd) ? p.timelineYmd : null,
+                    resourceCheckEnabled: p.resourceCheckEnabled === true
+                };
+            } catch (e) {
+                return fallback;
+            }
+        };
         
         const TYPE_COLORS = {
             DevelopmentTNRS: { bg: "bg-yellow-400", border: "border-yellow-600", label: "Development (TN-RS)" },
@@ -120,7 +189,8 @@
                 "refresh-cw": <g><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></g>,
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
-                spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>
+                spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>,
+                settings: <g><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></g>
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -195,7 +265,7 @@
         const App = () => {
             const [tasks, setTasks] = useState([]);
             const [isEditMode, setIsEditMode] = useState(false);
-            const [isResourceCheckEnabled, setIsResourceCheckEnabled] = useState(false);
+            const [isResourceCheckEnabled, setIsResourceCheckEnabled] = useState(() => readInitialAdminPrefs().resourceCheckEnabled === true);
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [errorMsg, setErrorMsg] = useState(null);
             
@@ -207,14 +277,36 @@
             const [modalData, setModalData] = useState({ project: "", category: "Gen10", pic: "", site: "MX", phases: [] });
             const [originalProjectName, setOriginalProjectName] = useState(null);
 
-            const [showAuthModal, setShowAuthModal] = useState(false);
-            const [passInput, setPassInput] = useState("");
-            const [authError, setAuthError] = useState(false);
+            const [editPassword, setEditPassword] = useState(() => readInitialAdminPrefs().editPassword);
+            const [defaultCategoriesList, setDefaultCategoriesList] = useState(() => readInitialAdminPrefs().defaultCategories);
+            const [defaultSitesList, setDefaultSitesList] = useState(() => readInitialAdminPrefs().defaultSites);
+            const [defaultPicsList, setDefaultPicsList] = useState(() => readInitialAdminPrefs().defaultPics);
+            const [timelineAnchor, setTimelineAnchor] = useState(() => {
+                const p = readInitialAdminPrefs();
+                return p.timelineYmd ? dateAtNoonFromYMD(p.timelineYmd) : getTaiwanTodayNoon();
+            });
+
+            const [gasUrl, setGasUrl] = useState(readInitialGasUrl);
+            const [showSettingsModal, setShowSettingsModal] = useState(false);
+            const [settingsTab, setSettingsTab] = useState("admin");
+            const [gasUrlDraft, setGasUrlDraft] = useState("");
+            const [settingsUrlError, setSettingsUrlError] = useState("");
+            const [settingsTestOk, setSettingsTestOk] = useState("");
+            const [editPassDraft, setEditPassDraft] = useState("");
+            const [unlockPassInput, setUnlockPassInput] = useState("");
+            const [unlockError, setUnlockError] = useState(false);
+            const [adminPassMsg, setAdminPassMsg] = useState("");
+            const [defaultsCatsDraft, setDefaultsCatsDraft] = useState("");
+            const [defaultsSitesDraft, setDefaultsSitesDraft] = useState("");
+            const [defaultsPicsDraft, setDefaultsPicsDraft] = useState("");
+            const [timelineDateDraft, setTimelineDateDraft] = useState("");
+            const [optionsSaveMsg, setOptionsSaveMsg] = useState("");
+            const [optionsSaveErr, setOptionsSaveErr] = useState("");
 
             const dynamicOptions = useMemo(() => {
-                const cats = new Set(DEFAULT_CATEGORIES);
-                const sites = new Set(DEFAULT_SITES);
-                const pics = new Set(DEFAULT_PICS);
+                const cats = new Set(defaultCategoriesList);
+                const sites = new Set(defaultSitesList);
+                const pics = new Set(defaultPicsList);
                 tasks.forEach(t => {
                     const c = formatText(t.category).trim(), s = formatText(t.site).trim(), p = formatText(t.pic).trim();
                     if (c) cats.add(c);
@@ -222,28 +314,55 @@
                     if (p) p.split(/[/,，&]/).forEach(n => n.trim() && pics.add(n.trim()));
                 });
                 return { categories: Array.from(cats).sort(), sites: Array.from(sites).sort(), pics: Array.from(pics).sort() };
-            }, [tasks]);
+            }, [tasks, defaultCategoriesList, defaultSitesList, defaultPicsList]);
 
-            const fetchFromSheets = async () => {
+            const persistAdminSnapshot = useCallback((overrides = {}) => {
+                const snap = {
+                    editPassword: overrides.editPassword !== undefined ? overrides.editPassword : editPassword,
+                    defaultCategories: overrides.defaultCategories !== undefined ? overrides.defaultCategories : defaultCategoriesList,
+                    defaultSites: overrides.defaultSites !== undefined ? overrides.defaultSites : defaultSitesList,
+                    defaultPics: overrides.defaultPics !== undefined ? overrides.defaultPics : defaultPicsList,
+                    timelineYmd: overrides.timelineYmd !== undefined ? overrides.timelineYmd : formatDate(timelineAnchor),
+                    resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled
+                };
+                try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
+            }, [editPassword, defaultCategoriesList, defaultSitesList, defaultPicsList, timelineAnchor, isResourceCheckEnabled]);
+
+            const fetchFromSheets = useCallback(async () => {
+                const base = normalizeGasUrl(gasUrl);
+                if (!base) {
+                    setTasks([]);
+                    setErrorMsg("Set your Google Apps Script Web App URL in Settings → GAS URL tab.");
+                    setSyncStatus('error');
+                    return;
+                }
                 setSyncStatus('syncing');
                 try {
-                    const res = await fetch(LOCKED_GAS_URL + "?t=" + Date.now());
+                    const res = await fetch(base + "?t=" + Date.now());
                     const data = await res.json();
                     if (Array.isArray(data)) {
                         setTasks(data);
                         setSyncStatus('synced');
                         setErrorMsg(null);
+                    } else {
+                        setErrorMsg("Invalid response from cloud (expected JSON array).");
+                        setSyncStatus('error');
                     }
                 } catch (err) {
                     setErrorMsg("Cloud connection failed.");
                     setSyncStatus('error');
                 }
-            };
+            }, [gasUrl]);
 
             const handleSaveToCloud = async (updated) => {
+                const base = normalizeGasUrl(gasUrl);
+                if (!base) {
+                    setErrorMsg("Set your Google Apps Script Web App URL in Settings → GAS URL tab.");
+                    return;
+                }
                 setSyncStatus('syncing');
                 try {
-                    await fetch(LOCKED_GAS_URL, {
+                    await fetch(base, {
                         method: 'POST', mode: 'no-cors',
                         body: JSON.stringify(updated)
                     });
@@ -251,25 +370,137 @@
                 } catch (e) { setErrorMsg("Failed to save changes."); }
             };
 
-            useEffect(() => { fetchFromSheets(); }, []);
+            useEffect(() => { fetchFromSheets(); }, [fetchFromSheets]);
 
-            const handleEditToggle = () => {
-                if (isEditMode) {
-                    setIsEditMode(false);
-                } else {
-                    setShowAuthModal(true);
-                    setAuthError(false);
-                    setPassInput("");
+            const openSettingsModal = (tab) => {
+                const t = tab === "options" ? "options" : tab === "gas" ? "gas" : "admin";
+                setSettingsTab(t);
+                setGasUrlDraft(gasUrl || "");
+                setSettingsUrlError("");
+                setSettingsTestOk("");
+                setEditPassDraft(editPassword);
+                setUnlockPassInput("");
+                setUnlockError(false);
+                setAdminPassMsg("");
+                setOptionsSaveMsg("");
+                setOptionsSaveErr("");
+                setDefaultsCatsDraft(defaultCategoriesList.join("\n"));
+                setDefaultsSitesDraft(defaultSitesList.join("\n"));
+                setDefaultsPicsDraft(defaultPicsList.join("\n"));
+                setTimelineDateDraft(formatDate(timelineAnchor));
+                setShowSettingsModal(true);
+            };
+
+            const testDraftGasUrl = async () => {
+                const normalized = normalizeGasUrl(gasUrlDraft);
+                setSettingsTestOk("");
+                if (!normalized) {
+                    setSettingsUrlError("URL cannot be empty.");
+                    return;
+                }
+                if (!isLikelyGasWebAppUrl(normalized)) {
+                    setSettingsUrlError("Use the Web App URL ending in /exec (script.google.com/macros/s/.../exec).");
+                    return;
+                }
+                setSettingsUrlError("");
+                try {
+                    const res = await fetch(normalized + "?t=" + Date.now());
+                    const data = await res.json();
+                    if (Array.isArray(data)) {
+                        setSettingsTestOk(`OK: received ${data.length} row(s) from this URL (not saved yet).`);
+                    } else {
+                        setSettingsUrlError("Connected but response was not a JSON array.");
+                    }
+                } catch (e) {
+                    setSettingsUrlError("Fetch failed: check URL and Web App deployment (Anyone / signed-in).");
                 }
             };
 
-            const handleVerifyPassword = () => {
-                if (passInput === EDIT_PASSWORD) {
-                    setIsEditMode(true);
-                    setShowAuthModal(false);
-                } else {
-                    setAuthError(true);
+            const applyGasUrlFromSettings = () => {
+                const normalized = normalizeGasUrl(gasUrlDraft);
+                if (!normalized) {
+                    setSettingsUrlError("URL cannot be empty.");
+                    return;
                 }
+                if (!isLikelyGasWebAppUrl(normalized)) {
+                    setSettingsUrlError("Use the Web App URL ending in /exec (script.google.com/macros/s/.../exec).");
+                    return;
+                }
+                try { localStorage.setItem(GAS_URL_STORAGE_KEY, normalized); } catch (e) { /* ignore */ }
+                setGasUrl(normalized);
+                setSettingsUrlError("");
+                setSettingsTestOk("");
+            };
+
+            const resetGasUrlToDefault = () => {
+                try { localStorage.removeItem(GAS_URL_STORAGE_KEY); } catch (e) { /* ignore */ }
+                setGasUrl(DEFAULT_GAS_URL);
+                setGasUrlDraft(DEFAULT_GAS_URL);
+                setSettingsUrlError("");
+                setSettingsTestOk("");
+            };
+
+            const saveEditPasscode = () => {
+                const np = editPassDraft.trim();
+                if (!np) {
+                    setAdminPassMsg("Passcode cannot be empty.");
+                    return;
+                }
+                setEditPassword(np);
+                persistAdminSnapshot({ editPassword: np });
+                setAdminPassMsg("Passcode saved for this browser.");
+                setUnlockError(false);
+            };
+
+            const tryUnlockEditMode = () => {
+                if (unlockPassInput === editPassword) {
+                    setIsEditMode(true);
+                    setUnlockError(false);
+                    setUnlockPassInput("");
+                } else {
+                    setUnlockError(true);
+                }
+            };
+
+            const saveDisplayOptions = () => {
+                setOptionsSaveErr("");
+                setOptionsSaveMsg("");
+                const ymd = String(timelineDateDraft || "").trim();
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+                    setOptionsSaveErr("Timeline date must be YYYY-MM-DD.");
+                    return;
+                }
+                let cats = parseLinesOrCommas(defaultsCatsDraft);
+                let sites = parseLinesOrCommas(defaultsSitesDraft);
+                let pics = parseLinesOrCommas(defaultsPicsDraft);
+                if (!cats.length) cats = [...DEFAULT_CATEGORIES];
+                if (!sites.length) sites = [...DEFAULT_SITES];
+                if (!pics.length) pics = [...DEFAULT_PICS];
+                const anchor = dateAtNoonFromYMD(ymd);
+                setDefaultCategoriesList(cats);
+                setDefaultSitesList(sites);
+                setDefaultPicsList(pics);
+                setTimelineAnchor(anchor);
+                persistAdminSnapshot({
+                    editPassword,
+                    defaultCategories: cats,
+                    defaultSites: sites,
+                    defaultPics: pics,
+                    timelineYmd: ymd,
+                    resourceCheckEnabled: isResourceCheckEnabled
+                });
+                setOptionsSaveMsg("Display options saved.");
+            };
+
+            const resetDisplayOptionsToBuiltin = () => {
+                setDefaultsCatsDraft(DEFAULT_CATEGORIES.join("\n"));
+                setDefaultsSitesDraft(DEFAULT_SITES.join("\n"));
+                setDefaultsPicsDraft(DEFAULT_PICS.join("\n"));
+                setTimelineDateDraft(formatDate(getTaiwanTodayNoon()));
+                setIsResourceCheckEnabled(false);
+                setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: false }), 0);
+                setOptionsSaveErr("");
+                setOptionsSaveMsg("Draft reset to built-in defaults (click Save to apply).");
             };
 
             const handleFilterToggle = (list, setList, item) => {
@@ -279,9 +510,9 @@
 
             const days = useMemo(() => {
                 const arr = [];
-                const startLimit = new Date(TODAY_INDICATOR);
-                startLimit.setDate(TODAY_INDICATOR.getDate() - 7);
-                const endLimit = new Date(TODAY_INDICATOR);
+                const startLimit = new Date(timelineAnchor);
+                startLimit.setDate(timelineAnchor.getDate() - 7);
+                const endLimit = new Date(timelineAnchor);
                 endLimit.setMonth(endLimit.getMonth() + 3);
                 let curr = new Date(startLimit);
                 while (curr <= endLimit) {
@@ -289,7 +520,7 @@
                     curr.setDate(curr.getDate() + 1);
                 }
                 return arr;
-            }, []);
+            }, [timelineAnchor]);
 
             const monthGroups = useMemo(() => {
                 const groups = [];
@@ -317,7 +548,7 @@
                 const groups = {};
                 dynamicOptions.categories.forEach(c => groups[c] = {});
                 filtered.forEach(t => {
-                    const c = formatText(t.category || 'Gen10'), p = formatText(t.project || 'Unknown');
+                    const c = formatText(t.category || (defaultCategoriesList[0] || 'Gen10')), p = formatText(t.project || 'Unknown');
                     if (!groups[c]) groups[c] = {};
                     if (!groups[c][p]) groups[c][p] = [];
                     groups[c][p].push(t);
@@ -328,7 +559,7 @@
                     if (ps.length > 0) result.push({ category: c, projects: ps });
                 });
                 return result;
-            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions]);
+            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions, defaultCategoriesList]);
 
             const resourceOverloadSet = useMemo(() => {
                 const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
@@ -372,14 +603,22 @@
                         </div>
                         <div className="flex gap-2 items-center">
                             <button
-                                onClick={() => setIsResourceCheckEnabled(prev => !prev)}
-                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight ${isResourceCheckEnabled ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-700 border-slate-600 hover:bg-slate-600'}`}
+                                type="button"
+                                onClick={() => openSettingsModal("gas")}
+                                className="px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight bg-slate-700 border-slate-600 hover:bg-slate-600 flex items-center gap-1"
+                                title="Settings (cloud URL, admin, display)"
                             >
-                                Resource Check: {isResourceCheckEnabled ? 'ON' : 'OFF'}
+                                <Icon name="settings" size={14} className="inline" /> Settings
                             </button>
-                            <button onClick={handleEditToggle} className={`px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg ${isEditMode ? 'bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20' : 'bg-slate-700 border-slate-600 hover:bg-slate-600'}`}>
-                                {isEditMode ? <><Icon name="x" size={12} className="inline mr-1" /> FINISH</> : <><Icon name="lock" size={12} className="inline mr-1" /> OPEN EDIT MODE</>}
-                            </button>
+                            {isEditMode && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditMode(false)}
+                                    className="px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20"
+                                >
+                                    <Icon name="x" size={12} className="inline mr-1" /> Finish editing
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -403,7 +642,7 @@
                     {/* New Project Control */}
                     {isEditMode && (
                         <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex justify-end shrink-0 z-[400]">
-                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: "Gen10", pic: "", site: "MX", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
+                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: defaultCategoriesList[0] || "Gen10", pic: defaultPicsList[0] || "", site: defaultSitesList[0] || "MX", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
                                 <Icon name="plus" size={14} className="inline mr-1" /> New Project
                             </button>
                         </div>
@@ -426,7 +665,7 @@
                                     {days.map((day, i) => {
                                         const dateNum = dateToNum(day);
                                         const holiday = isHoliday(day);
-                                        const isToday = dateNum === dateToNum(TODAY_INDICATOR);
+                                        const isToday = dateNum === dateToNum(timelineAnchor);
                                         return (
                                             <th key={i} className={`w-8 h-8 border-r border-gray-200 text-[9px] py-1 font-mono text-center ${holiday ? 'bg-slate-200 text-red-500 font-black' : 'text-slate-500'} ${isToday ? 'bg-red-50 text-red-600 border-x-red-400 font-black' : ''}`}>
                                                 {day.getDate()}
@@ -485,7 +724,7 @@
                                                         const dateNum = dateToNum(day);
                                                         const active = phases.find(t => dateNum >= strToNum(t.start) && dateNum <= strToNum(t.end));
                                                         const holiday = isHoliday(day);
-                                                        const isToday = dateNum === dateToNum(TODAY_INDICATOR);
+                                                        const isToday = dateNum === dateToNum(timelineAnchor);
                                                         const typeKey = active ? normalizeTypeKey(active.type) : "";
                                                         const color = TYPE_COLORS[typeKey] || TYPE_COLORS.DevelopmentTNRS;
                                                         const isResourceOverloaded = isResourceCheckEnabled &&
@@ -531,32 +770,123 @@
                         <span className="text-slate-300 font-black italic">Persistent Matrix Link</span>
                     </div>
 
-                    {/* Password Modal */}
-                    {showAuthModal && (
-                        <div className="fixed inset-0 z-[5000] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 p-8 text-center space-y-6">
-                                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto font-black">
-                                    <Icon name="key" size={32} />
+                    {/* Settings: Admin + Options */}
+                    {showSettingsModal && (
+                        <div className="fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
+                                <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center gap-3 shrink-0 bg-slate-50">
+                                    <div>
+                                        <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                                            <Icon name="settings" size={20} className="text-blue-600" /> Settings
+                                        </h3>
+                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Options · Admin · GAS URL</p>
+                                    </div>
+                                    <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
                                 </div>
-                                <div className="font-black">
-                                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Security Access</h3>
-                                    <p className="text-slate-500 text-[11px] mt-1 font-bold">Please enter passcode to enable Edit Mode.</p>
+                                <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
+                                    <button type="button" onClick={() => setSettingsTab("options")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "options" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Options</button>
+                                    <button type="button" onClick={() => setSettingsTab("admin")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
+                                    <button type="button" onClick={() => setSettingsTab("gas")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
                                 </div>
-                                <div className="space-y-2">
-                                    <input 
-                                        type="password" 
-                                        value={passInput}
-                                        autoFocus
-                                        onChange={(e)=>setPassInput(e.target.value)}
-                                        onKeyDown={(e)=> e.key === 'Enter' && handleVerifyPassword()}
-                                        placeholder="••••"
-                                        className={`w-full px-4 py-3 bg-slate-50 border-2 rounded-xl text-center text-2xl font-mono tracking-[1em] outline-none transition-all ${authError ? 'border-red-500 animate-shake' : 'border-slate-100 focus:border-blue-500'}`}
-                                    />
-                                    {authError && <p className="text-red-500 text-[10px] font-bold uppercase tracking-tight font-black">Invalid Passcode.</p>}
-                                </div>
-                                <div className="flex gap-3 pt-2 font-black font-sans">
-                                    <button onClick={()=>setShowAuthModal(false)} className="flex-1 px-4 py-2.5 text-slate-400 font-bold hover:bg-slate-50 rounded-xl transition-all uppercase text-[11px] font-black">Cancel</button>
-                                    <button onClick={handleVerifyPassword} className="flex-1 px-4 py-2.5 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 transition-all uppercase text-[11px] shadow-lg shadow-blue-500/20 font-black">Verify</button>
+                                <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
+                                    {settingsTab === "admin" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2"><Icon name="lock" size={16} /> Edit mode</h4>
+                                                <p className="text-slate-500 text-[10px] font-bold">Save a passcode for this browser, then unlock editing for this session. Cloud URL is configured in the <span className="text-slate-800">GAS URL</span> tab.</p>
+                                                <div className="grid gap-3 sm:grid-cols-2">
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">Passcode (local)</label>
+                                                        <input type="password" value={editPassDraft} onChange={(e) => { setEditPassDraft(e.target.value); setAdminPassMsg(""); }} className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500" autoComplete="new-password" />
+                                                        <button type="button" onClick={saveEditPasscode} className="px-3 py-1.5 bg-slate-200 text-slate-900 font-black rounded-lg uppercase text-[10px] hover:bg-slate-300">Save passcode</button>
+                                                        {adminPassMsg && <p className={`text-[10px] font-bold ${adminPassMsg.includes("cannot") ? "text-red-600" : "text-emerald-700"}`}>{adminPassMsg}</p>}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">Unlock editing</label>
+                                                        <input type="password" value={unlockPassInput} onChange={(e) => { setUnlockPassInput(e.target.value); setUnlockError(false); }} onKeyDown={(e) => e.key === "Enter" && tryUnlockEditMode()} className={`w-full px-3 py-2 bg-slate-50 border-2 rounded-xl text-[11px] outline-none focus:border-blue-500 ${unlockError ? "border-red-400 animate-shake" : "border-slate-100"}`} placeholder="Current passcode" autoComplete="off" />
+                                                        {unlockError && <p className="text-red-600 text-[10px] font-bold">Invalid passcode.</p>}
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button type="button" onClick={tryUnlockEditMode} className="px-3 py-1.5 bg-green-600 text-white font-black rounded-lg uppercase text-[10px] hover:bg-green-700">Enable edit mode</button>
+                                                            {isEditMode && <button type="button" onClick={() => setIsEditMode(false)} className="px-3 py-1.5 bg-orange-100 text-orange-800 border border-orange-300 font-black rounded-lg uppercase text-[10px]">Exit edit mode</button>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "options" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Display</h4>
+                                                <label className="block text-[9px] font-black text-slate-400 uppercase">Timeline reference date (&quot;today&quot; line &amp; window)</label>
+                                                <input type="date" value={timelineDateDraft} onChange={(e) => setTimelineDateDraft(e.target.value)} className="px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500 font-mono max-w-xs" />
+                                                <div className="flex items-center justify-between gap-4 flex-wrap border border-slate-200 rounded-xl px-3 py-2 bg-slate-50">
+                                                    <span className="text-[10px] font-black text-slate-700 uppercase">Resource check (overload highlight)</span>
+                                                    <button type="button" onClick={() => setIsResourceCheckEnabled((prev) => {
+                                                        const next = !prev;
+                                                        setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
+                                                        return next;
+                                                    })} className={`px-3 py-1 rounded-lg font-black text-[10px] uppercase border ${isResourceCheckEnabled ? "bg-red-600 border-red-500 text-white" : "bg-white border-slate-300 text-slate-600"}`}>{isResourceCheckEnabled ? "On" : "Off"}</button>
+                                                </div>
+                                            </section>
+                                            <section className="space-y-3 pt-2 border-t border-slate-200">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Default filter chips</h4>
+                                                <p className="text-slate-500 text-[10px] font-bold">One per line or comma-separated. All empty uses built-in lists.</p>
+                                                <div className="grid gap-3 sm:grid-cols-3">
+                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Gen</label><textarea value={defaultsCatsDraft} onChange={(e) => setDefaultsCatsDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
+                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Site</label><textarea value={defaultsSitesDraft} onChange={(e) => setDefaultsSitesDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
+                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">PIC</label><textarea value={defaultsPicsDraft} onChange={(e) => setDefaultsPicsDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
+                                                </div>
+                                                {optionsSaveErr && <p className="text-red-600 text-[10px] font-bold">{optionsSaveErr}</p>}
+                                                {optionsSaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{optionsSaveMsg}</p>}
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={saveDisplayOptions} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">Save display options</button>
+                                                    <button type="button" onClick={resetDisplayOptionsToBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">Load built-in into form</button>
+                                                </div>
+                                            </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "gas" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2"><Icon name="database" size={16} /> Google Apps Script · Web App URL</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    每位使用者可在這裡貼上<strong>自己的</strong>部署網址（結尾為 <code className="bg-slate-100 px-1 rounded">/exec</code>），此瀏覽器會記住網址並向對應的試算表讀寫資料。
+                                                </p>
+                                                <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/80 p-3 space-y-2">
+                                                    <div className="text-[9px] font-black uppercase text-emerald-800 tracking-wider">目前使用中的網址</div>
+                                                    <div className="text-[10px] font-mono text-emerald-950 break-all leading-relaxed">
+                                                        {normalizeGasUrl(gasUrl) || <span className="text-amber-700 font-sans">（尚未設定 — 請在下方貼上網址並儲存）</span>}
+                                                    </div>
+                                                </div>
+                                            </section>
+                                            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                                <h4 className="text-[11px] font-black text-slate-700 border-b border-slate-200 pb-2">如何建立專屬 GAS Web App 網址（初學指引）</h4>
+                                                <ol className="list-decimal pl-4 space-y-2 text-[10px] text-slate-700 font-bold leading-relaxed">
+                                                    <li>在 Google 雲端硬碟<strong>建立一個試算表</strong>（或開啟既有試算表），作為你的資料庫。</li>
+                                                    <li>試算表中依本工具需要的欄位建立資料（或複製公版試算表結構）。</li>
+                                                    <li>選單<strong>「擴充功能」→「Apps Script」</strong>，開啟指令碼編輯器；撰寫或貼上與本頁相容的程式（需實作讀取試算表並以 JSON 陣列回傳、以及接收 POST 寫回等邏輯 — 請參考專案 README 或公版 Apps Script 範本）。</li>
+                                                    <li>在編輯器右上角點<strong>「部署」→「新增部署作業」</strong>，類型選<strong>「網頁應用程式」</strong>。</li>
+                                                    <li>「執行身分」通常選<strong>「我」</strong>；「具有存取權的使用者」依需求選<strong>「所有人」</strong>或僅限機構成員（注意：任何人可存取時請勿放敏感資料）。</li>
+                                                    <li>部署完成後，複製<strong>「網頁應用程式」網址</strong>，確認格式為 <code className="bg-white px-1 rounded border">https://script.google.com/macros/s/…/exec</code>。</li>
+                                                    <li>將網址貼到下方欄位，先按<strong>「測試網址」</strong>確認會回傳 JSON 陣列，再按<strong>「儲存並連線」</strong>。之後同一瀏覽器會自動使用此網址。</li>
+                                                </ol>
+                                                <p className="text-[9px] text-slate-500 font-bold pt-1 border-t border-slate-200">若更換試算表僅需在同一 Apps Script 專案中改連結的表，通常不必改網址；若新建了另一個 Script 專案並重新部署，才需要換新的 <code className="bg-white px-0.5 rounded">/exec</code> 網址。</p>
+                                            </section>
+                                            <section className="space-y-3 pt-1 border-t border-slate-200">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider">變更為新的 Web App 網址</h4>
+                                                <label className="block text-[9px] font-black text-slate-400 uppercase">Web App URL（貼上完整網址）</label>
+                                                <textarea value={gasUrlDraft} onChange={(e) => { setGasUrlDraft(e.target.value); setSettingsUrlError(""); setSettingsTestOk(""); }} rows={4} spellCheck={false} placeholder="https://script.google.com/macros/s/…/exec" className="w-full px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] font-mono outline-none focus:border-blue-500 resize-y min-h-[5rem]" />
+                                                {settingsUrlError && <p className="text-red-600 text-[10px] font-bold">{settingsUrlError}</p>}
+                                                {settingsTestOk && <p className="text-emerald-700 text-[10px] font-bold">{settingsTestOk}</p>}
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={applyGasUrlFromSettings} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 transition-all uppercase text-[10px]">儲存並連線</button>
+                                                    <button type="button" onClick={testDraftGasUrl} className="px-4 py-2 bg-blue-50 text-blue-800 border border-blue-200 font-black rounded-xl hover:bg-blue-100 uppercase text-[10px]">測試網址</button>
+                                                    <button type="button" onClick={resetGasUrlToDefault} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px] ml-auto">還原內建預設網址</button>
+                                                </div>
+                                            </section>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
