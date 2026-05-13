@@ -119,6 +119,14 @@
 
         const DEFAULT_VISIBLE_DAYS_BEFORE = 7;
         const DEFAULT_VISIBLE_DAYS_AFTER = 90;
+        const DEFAULT_CHART_TITLE = "Monica NPI Project Chart";
+
+        /** 標題 override：允許為空字串（表示「使用試算表名稱」），最多 120 字。 */
+        const normalizeChartTitleOverride = (raw) => {
+            let s = String(raw ?? "").replace(/[\r\n]+/g, " ").trim();
+            if (s.length > 120) s = s.slice(0, 120).trim();
+            return s;
+        };
 
         const INITIAL_SERIES_LIST = ['Gen10', 'Gen11', 'Gen12 AMD', 'Gen12 Intel'];
         const INITIAL_SITE_LIST = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
@@ -152,7 +160,8 @@
                 visibleDaysAfter: DEFAULT_VISIBLE_DAYS_AFTER,
                 resourceCheckEnabled: false,
                 seriesList: [...INITIAL_SERIES_LIST],
-                siteList: [...INITIAL_SITE_LIST]
+                siteList: [...INITIAL_SITE_LIST],
+                chartTitleOverride: ""
             };
             try {
                 const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
@@ -173,13 +182,27 @@
                 }
                 if (!seriesList.length) seriesList = [...fallback.seriesList];
                 if (!siteList.length) siteList = [...fallback.siteList];
+
+                // chartTitleOverride：可為空字串（= 使用雲端試算表名稱）。
+                // 兼容舊欄位 chartTitle：若該值存在且非預設標題，視為使用者自訂的 override。
+                let chartTitleOverride = "";
+                if (typeof p.chartTitleOverride === "string") {
+                    chartTitleOverride = normalizeChartTitleOverride(p.chartTitleOverride);
+                } else if (typeof p.chartTitle === "string") {
+                    const legacy = normalizeChartTitleOverride(p.chartTitle);
+                    if (legacy && legacy !== DEFAULT_CHART_TITLE) {
+                        chartTitleOverride = legacy;
+                    }
+                }
+
                 return {
                     editPassword: typeof p.editPassword === "string" && p.editPassword.trim() ? p.editPassword.trim() : fallback.editPassword,
                     visibleDaysBefore: clampInt(p.visibleDaysBefore, fallback.visibleDaysBefore, 0, 730),
                     visibleDaysAfter: clampInt(p.visibleDaysAfter, fallback.visibleDaysAfter, 0, 730),
                     resourceCheckEnabled: p.resourceCheckEnabled === true,
                     seriesList,
-                    siteList
+                    siteList,
+                    chartTitleOverride
                 };
             } catch (e) {
                 return fallback;
@@ -315,6 +338,8 @@
             const [editPassword, setEditPassword] = useState(() => readInitialAdminPrefs().editPassword);
             const [visibleDaysBefore, setVisibleDaysBefore] = useState(() => readInitialAdminPrefs().visibleDaysBefore);
             const [visibleDaysAfter, setVisibleDaysAfter] = useState(() => readInitialAdminPrefs().visibleDaysAfter);
+            const [chartTitleOverride, setChartTitleOverride] = useState(() => readInitialAdminPrefs().chartTitleOverride);
+            const [remoteChartTitle, setRemoteChartTitle] = useState("");
 
             const [seriesList, setSeriesList] = useState(() => readInitialAdminPrefs().seriesList);
             const [siteList, setSiteList] = useState(() => readInitialAdminPrefs().siteList);
@@ -338,6 +363,7 @@
             const [adminPassMsg, setAdminPassMsg] = useState("");
             const [visibleDaysBeforeDraft, setVisibleDaysBeforeDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysBefore));
             const [visibleDaysAfterDraft, setVisibleDaysAfterDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysAfter));
+            const [chartTitleDraft, setChartTitleDraft] = useState(() => readInitialAdminPrefs().chartTitleOverride);
             const [displaySaveMsg, setDisplaySaveMsg] = useState("");
             const [displaySaveErr, setDisplaySaveErr] = useState("");
 
@@ -361,10 +387,19 @@
                     visibleDaysAfter: overrides.visibleDaysAfter !== undefined ? overrides.visibleDaysAfter : visibleDaysAfter,
                     resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled,
                     seriesList: overrides.seriesList !== undefined ? overrides.seriesList : seriesList,
-                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList
+                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList,
+                    chartTitleOverride: overrides.chartTitleOverride !== undefined ? overrides.chartTitleOverride : chartTitleOverride
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList]);
+            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList, chartTitleOverride]);
+
+            const effectiveChartTitle = useMemo(() => {
+                const o = (chartTitleOverride || "").trim();
+                if (o) return o;
+                const r = (remoteChartTitle || "").trim();
+                if (r) return r;
+                return DEFAULT_CHART_TITLE;
+            }, [chartTitleOverride, remoteChartTitle]);
 
             const addSeriesItem = useCallback(() => {
                 setLabelsTabErr("");
@@ -473,6 +508,23 @@
                 }
             }, [gasUrl]);
 
+            const fetchChartMeta = useCallback(async () => {
+                const base = normalizeGasUrl(gasUrl);
+                if (!base) {
+                    setRemoteChartTitle("");
+                    return;
+                }
+                try {
+                    const res = await fetch(base + "?meta=1&t=" + Date.now());
+                    const data = await res.json();
+                    if (data && typeof data === "object" && !Array.isArray(data) && typeof data.title === "string") {
+                        setRemoteChartTitle(data.title.trim());
+                    }
+                } catch (e) {
+                    // 舊版 GAS 未實作 ?meta=1 → 靜默忽略，會 fallback 到本機 override / 內建預設
+                }
+            }, [gasUrl]);
+
             const handleSaveToCloud = async (updated) => {
                 const base = normalizeGasUrl(gasUrl);
                 if (!base) {
@@ -490,6 +542,11 @@
             };
 
             useEffect(() => { fetchFromSheets(); }, [fetchFromSheets]);
+            useEffect(() => { fetchChartMeta(); }, [fetchChartMeta]);
+
+            useEffect(() => {
+                document.title = effectiveChartTitle;
+            }, [effectiveChartTitle]);
 
             const openSettingsModal = (tab) => {
                 let t = "display";
@@ -513,6 +570,7 @@
                 setHeaderShareLinkToast("");
                 setVisibleDaysBeforeDraft(String(visibleDaysBefore));
                 setVisibleDaysAfterDraft(String(visibleDaysAfter));
+                setChartTitleDraft(chartTitleOverride);
                 setShowSettingsModal(true);
             };
 
@@ -648,6 +706,35 @@
                 setDisplaySaveErr("");
                 setDisplaySaveMsg("已帶入內建預設（前 7 天、後 90 天），可按儲存套用。");
             };
+
+            const saveChartTitleOverride = () => {
+                setDisplaySaveErr("");
+                setDisplaySaveMsg("");
+                const next = normalizeChartTitleOverride(chartTitleDraft);
+                setChartTitleOverride(next);
+                setChartTitleDraft(next);
+                persistAdminSnapshot({ chartTitleOverride: next });
+                if (next) {
+                    setDisplaySaveMsg("自訂標題已儲存（覆蓋試算表名稱，僅本機生效）。");
+                } else {
+                    setDisplaySaveMsg("已清除自訂標題，將自動使用 Google 試算表名稱。");
+                }
+            };
+
+            const useRemoteChartTitle = () => {
+                setChartTitleOverride("");
+                setChartTitleDraft("");
+                persistAdminSnapshot({ chartTitleOverride: "" });
+                setDisplaySaveErr("");
+                setDisplaySaveMsg("已切換為使用 Google 試算表名稱。");
+            };
+
+            const refreshRemoteChartTitle = async () => {
+                setDisplaySaveErr("");
+                setDisplaySaveMsg("");
+                await fetchChartMeta();
+                setDisplaySaveMsg("已重新從試算表抓取標題（若仍空白，請確認 GAS 已部署支援 ?meta=1 的版本）。");
+            };
             const handleFilterToggle = (list, setList, item) => {
                 if (item === 'All') setList([]);
                 else setList(prev => prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]);
@@ -739,12 +826,12 @@
                 <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
                     {/* Header */}
                     <div className="bg-slate-900 text-white px-4 py-2 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-md">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div className={`p-1.5 rounded-md ${syncStatus === 'synced' ? 'bg-green-600' : 'bg-orange-500 animate-pulse'}`}>
                                 <Icon name="database" size={16} />
                             </div>
-                            <div className="flex items-baseline gap-2 text-left font-black">
-                                <h1 className="text-base font-black tracking-tighter uppercase underline decoration-green-500 underline-offset-4">Monica NPI Project Chart</h1>
+                            <div className="flex items-baseline gap-2 text-left font-black min-w-0 flex-1 mr-2">
+                                <h1 className="text-base font-black tracking-tighter uppercase underline decoration-green-500 underline-offset-4 truncate" title={effectiveChartTitle}>{effectiveChartTitle}</h1>
                                 <span className="text-[10px] text-slate-400 font-black italic tracking-widest">@Dixon Chu</span>
                             </div>
                         </div>
@@ -965,6 +1052,33 @@
                                 <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
                                     {settingsTab === "display" && (
                                         <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">甘特圖標題</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    主畫面左上角標題預設使用 <strong>Google 試算表的檔案名稱</strong>（透過 GAS <code className="bg-slate-100 px-1 rounded">?meta=1</code> 取得），所有開啟同一支 GAS 的人都會看到相同名字。若要在本機顯示不同名稱，可在下方輸入<strong>本機自訂標題</strong>覆蓋（僅這台瀏覽器生效）。
+                                                </p>
+                                                <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/80 p-3 space-y-1.5">
+                                                    <div className="text-[9px] font-black uppercase text-emerald-800 tracking-wider">目前使用中的標題</div>
+                                                    <div className="text-[13px] font-black text-emerald-950 break-words leading-tight">{effectiveChartTitle}</div>
+                                                    <div className="text-[9px] text-emerald-800/90 font-bold">
+                                                        來源：{chartTitleOverride.trim()
+                                                            ? "本機自訂"
+                                                            : (remoteChartTitle ? "Google 試算表名稱" : "內建預設")}
+                                                        {remoteChartTitle
+                                                            ? <>（試算表回傳：<span className="font-mono">{remoteChartTitle}</span>）</>
+                                                            : <span className="text-amber-700">（尚未取得試算表名稱 — 請確認 GAS 已部署支援 <code className="bg-white/70 px-1 rounded">?meta=1</code> 的版本）</span>}
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1 max-w-xl">
+                                                    <label className="block text-[9px] font-black text-slate-400 uppercase">本機自訂標題（留空 = 使用試算表名稱）</label>
+                                                    <input type="text" value={chartTitleDraft} onChange={(e) => { setChartTitleDraft(e.target.value); setDisplaySaveErr(""); setDisplaySaveMsg(""); }} maxLength={120} placeholder={remoteChartTitle || DEFAULT_CHART_TITLE} className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[12px] font-black text-slate-800 outline-none focus:border-blue-500" />
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={saveChartTitleOverride} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">儲存自訂標題</button>
+                                                    <button type="button" onClick={useRemoteChartTitle} disabled={!chartTitleOverride.trim()} className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] ${chartTitleOverride.trim() ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100" : "bg-slate-100 text-slate-300 border border-slate-100 cursor-not-allowed"}`}>改用試算表名稱</button>
+                                                    <button type="button" onClick={refreshRemoteChartTitle} className="px-4 py-2 bg-blue-50 text-blue-800 border border-blue-200 font-black rounded-xl hover:bg-blue-100 uppercase text-[10px] ml-auto">重新抓取試算表名稱</button>
+                                                </div>
+                                            </section>
                                             <section className="space-y-3">
                                                 <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">可視日期範圍</h4>
                                                 <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
