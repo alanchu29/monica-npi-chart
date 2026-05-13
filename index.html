@@ -494,10 +494,15 @@
             const [selectedPics, setSelectedPics] = useState([]);
             const [collapsedSeries, setCollapsedSeries] = useState({});
             const [showModal, setShowModal] = useState(false);
-            const [modalData, setModalData] = useState(() => {
-                const p = readInitialAdminPrefs();
-                return { project: "", category: p.seriesList[0] || "", pic: DEFAULT_PICS[0] || "", site: p.siteList[0] || "", phases: [] };
-            });
+            // seriesList / siteList 已改為雲端載入，初始 modalData 用內建預設；
+            // 開新專案時 (見 "New Project" 按鈕) 會用當下最新的 seriesList / siteList 重設。
+            const [modalData, setModalData] = useState(() => ({
+                project: "",
+                category: INITIAL_SERIES_LIST[0] || "",
+                pic: DEFAULT_PICS[0] || "",
+                site: INITIAL_SITE_LIST[0] || "",
+                phases: []
+            }));
             const [originalProjectName, setOriginalProjectName] = useState(null);
 
             // editPassword 改由 GAS 雲端管理，初始為空（無密碼）；等 fetchRemoteMeta() 回來再覆寫。
