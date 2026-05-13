@@ -766,6 +766,8 @@ function sanitizeLabels_(input) {
             const [ioImportApplyTitle, setIoImportApplyTitle] = useState(true);
             const [ioImportApplyLabels, setIoImportApplyLabels] = useState(true);
             const [ioImportApplyTasks, setIoImportApplyTasks] = useState(true);
+            // 匯入模式：'overwrite' = 清空後寫入（預設）；'merge' = 追加 / 合併到現有資料
+            const [ioImportMode, setIoImportMode] = useState('overwrite');
             const ioFileInputRef = useRef(null);
 
             // 通用確認 modal（用於刪除等破壞性操作）
@@ -1335,6 +1337,7 @@ function sanitizeLabels_(input) {
                 setIoImportFileName("");
                 setIoImportError("");
                 setIoImportStatus("");
+                setIoImportMode('overwrite');
                 if (ioFileInputRef.current) ioFileInputRef.current.value = "";
             };
 
@@ -1410,31 +1413,53 @@ function sanitizeLabels_(input) {
                         }
                     }
 
+                    const isMerge = ioImportMode === 'merge';
+
                     // 2) Labels（Series / Phase / Site / 顏色）
                     if (ioImportApplyLabels && data.labels && typeof data.labels === 'object') {
                         const built = buildLabelsFromAny(data.labels);
-                        setSeriesList(built.seriesList);
-                        setSiteList(built.siteList);
-                        setSeriesColors(built.seriesColors);
-                        setPhaseList(built.phaseList);
-                        const ok = await saveLabelsToSheet({
-                            seriesList: built.seriesList,
-                            siteList: built.siteList,
-                            seriesColors: built.seriesColors,
-                            phaseList: built.phaseList
-                        });
-                        summary.push(`labels: ${built.seriesList.length} series / ${built.phaseList.length} phases / ${built.siteList.length} sites${ok ? "" : "（寫入失敗）"}`);
+                        let finalLabels;
+                        if (isMerge) {
+                            // 合併模式：聯集 + 既有優先（不覆蓋既有顏色 / phase 設定）
+                            const mergedSeriesList = [...seriesList];
+                            built.seriesList.forEach((s) => { if (!mergedSeriesList.includes(s)) mergedSeriesList.push(s); });
+                            const mergedSiteList = [...siteList];
+                            built.siteList.forEach((s) => { if (!mergedSiteList.includes(s)) mergedSiteList.push(s); });
+                            const mergedSeriesColors = { ...built.seriesColors, ...seriesColors };
+                            const existingPhaseKeys = new Set(phaseList.map((p) => p.key));
+                            const mergedPhaseList = [...phaseList];
+                            built.phaseList.forEach((p) => { if (!existingPhaseKeys.has(p.key)) mergedPhaseList.push(p); });
+                            finalLabels = {
+                                seriesList: mergedSeriesList,
+                                siteList: mergedSiteList,
+                                seriesColors: mergedSeriesColors,
+                                phaseList: mergedPhaseList,
+                            };
+                        } else {
+                            finalLabels = built;
+                        }
+                        setSeriesList(finalLabels.seriesList);
+                        setSiteList(finalLabels.siteList);
+                        setSeriesColors(finalLabels.seriesColors);
+                        setPhaseList(finalLabels.phaseList);
+                        const ok = await saveLabelsToSheet(finalLabels);
+                        summary.push(`labels${isMerge ? "（合併）" : ""}: ${finalLabels.seriesList.length} series / ${finalLabels.phaseList.length} phases / ${finalLabels.siteList.length} sites${ok ? "" : "（寫入失敗）"}`);
                     }
 
-                    // 3) Tasks（覆寫整本試算表）
+                    // 3) Tasks（覆寫整本試算表 or 合併追加）
                     if (ioImportApplyTasks && Array.isArray(data.tasks)) {
+                        const payloadTasks = isMerge ? [...tasks, ...data.tasks] : data.tasks;
                         try {
                             await fetch(base, {
                                 method: 'POST',
                                 mode: 'no-cors',
-                                body: JSON.stringify(data.tasks)
+                                body: JSON.stringify(payloadTasks)
                             });
-                            summary.push(`tasks: 已寫入 ${data.tasks.length} 列（會在數秒後自動重新整理）`);
+                            if (isMerge) {
+                                summary.push(`tasks（合併）: 將匯入的 ${data.tasks.length} 列追加到現有 ${tasks.length} 列後（共 ${payloadTasks.length} 列，不去重）`);
+                            } else {
+                                summary.push(`tasks: 已寫入 ${data.tasks.length} 列（會在數秒後自動重新整理）`);
+                            }
                             // 4 秒後重新拉雲端資料，讓畫面同步
                             setTimeout(() => { fetchFromSheets(); }, 4000);
                         } catch (err) {
@@ -1454,7 +1479,7 @@ function sanitizeLabels_(input) {
                 } finally {
                     setIoImportBusy(false);
                 }
-            }, [ioImportPayload, ioImportApplyTitle, ioImportApplyLabels, ioImportApplyTasks, gasUrl, saveLabelsToSheet, fetchFromSheets, fetchRemoteMeta]);
+            }, [ioImportPayload, ioImportApplyTitle, ioImportApplyLabels, ioImportApplyTasks, ioImportMode, gasUrl, saveLabelsToSheet, fetchFromSheets, fetchRemoteMeta, seriesList, siteList, seriesColors, phaseList, tasks]);
 
             const testDraftGasUrl = async () => {
                 const normalized = normalizeGasUrl(gasUrlDraft);
@@ -2061,7 +2086,6 @@ function sanitizeLabels_(input) {
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
                                             <Icon name="settings" size={20} className="text-blue-600" /> Settings
                                         </h3>
-                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Series · Phase · Site · Admin · GAS URL</p>
                                     </div>
                                     {normalizeGasUrl(gasUrl) ? (
                                         <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
@@ -2186,7 +2210,6 @@ function sanitizeLabels_(input) {
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
                                                 維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>，<strong>同步存於 Google 試算表</strong>（GAS DocumentProperties）。Phase 對應試算表欄位 <code className="bg-slate-100 px-1 rounded">type</code>。可調整名稱與顏色、新增/刪除；Phase 的<strong>內部識別 key</strong> 自動依名稱產生，方便對應既有資料。
                                             </p>
-                                            <p className="text-[9px] text-amber-700 font-bold leading-relaxed">提醒：<strong>Resource Check</strong> 仰賴 <code className="bg-white/70 px-1 rounded">DevelopmentTNRS</code> 與 <code className="bg-white/70 px-1 rounded">DevelopmentPI</code> 這兩個 key，若刪除可能會關閉超載偵測。</p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
                                             {labelsTabErr && <p className="text-red-600 text-[10px] font-bold">{labelsTabErr}</p>}
@@ -2398,18 +2421,57 @@ function sanitizeLabels_(input) {
                                                         </div>
 
                                                         <div className="space-y-1.5">
+                                                            <div className="text-[9px] font-black uppercase text-amber-700 tracking-wider">匯入模式</div>
+                                                            <div className="inline-flex rounded-lg border-2 border-amber-300 bg-white overflow-hidden text-[10px] font-black uppercase tracking-wide">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setIoImportMode('overwrite')}
+                                                                    disabled={ioImportBusy}
+                                                                    className={`px-3 py-1.5 transition ${ioImportMode === 'overwrite' ? 'bg-red-600 text-white' : 'text-slate-600 hover:bg-amber-50'} ${ioImportBusy ? 'cursor-not-allowed opacity-60' : ''}`}
+                                                                >覆寫</button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setIoImportMode('merge')}
+                                                                    disabled={ioImportBusy}
+                                                                    className={`px-3 py-1.5 transition border-l-2 border-amber-300 ${ioImportMode === 'merge' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-amber-50'} ${ioImportBusy ? 'cursor-not-allowed opacity-60' : ''}`}
+                                                                >合併</button>
+                                                            </div>
+                                                            <p className="text-[10px] text-slate-600 font-bold leading-relaxed">
+                                                                {ioImportMode === 'merge' ? (
+                                                                    <><strong className="text-emerald-700">合併模式</strong>：把匯入檔的內容<strong>追加</strong>到現有資料後面。Labels 取聯集（既有顏色 / Phase 設定優先保留）；Tasks <strong>直接追加、不去重</strong>，重複的列會重複出現。適合「多筆案子加入現有計畫」。</>
+                                                                ) : (
+                                                                    <><strong className="text-red-700">覆寫模式</strong>：把匯入檔當成完整快照寫回。Labels 取代現有設定；Tasks <strong>清空試算表後重寫</strong>。適合「還原備份」或「整批替換」。</>
+                                                                )}
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="space-y-1.5">
                                                             <div className="text-[9px] font-black uppercase text-amber-700 tracking-wider">套用範圍</div>
                                                             <label className="flex items-start gap-2 text-[11px] font-bold text-slate-700">
                                                                 <input type="checkbox" checked={ioImportApplyTitle} onChange={(e) => setIoImportApplyTitle(e.target.checked)} disabled={!(typeof ioImportPayload.title === 'string' && ioImportPayload.title.trim()) || ioImportBusy} className="mt-0.5" />
-                                                                <span>套用試算表標題</span>
+                                                                <span>套用試算表標題{ioImportMode === 'merge' ? '（合併模式下仍會直接取代標題）' : ''}</span>
                                                             </label>
                                                             <label className="flex items-start gap-2 text-[11px] font-bold text-slate-700">
                                                                 <input type="checkbox" checked={ioImportApplyLabels} onChange={(e) => setIoImportApplyLabels(e.target.checked)} disabled={!(ioImportPayload.labels && typeof ioImportPayload.labels === 'object') || ioImportBusy} className="mt-0.5" />
-                                                                <span>套用 Series / Phase / Site / 顏色（會<strong>覆寫</strong>目前雲端設定）</span>
+                                                                <span>
+                                                                    套用 Series / Phase / Site / 顏色（
+                                                                    {ioImportMode === 'merge'
+                                                                        ? <>會<strong className="text-emerald-700">聯集合併</strong>，既有設定優先保留</>
+                                                                        : <>會<strong>覆寫</strong>目前雲端設定</>
+                                                                    }
+                                                                    ）
+                                                                </span>
                                                             </label>
-                                                            <label className="flex items-start gap-2 text-[11px] font-bold text-red-700">
+                                                            <label className={`flex items-start gap-2 text-[11px] font-bold ${ioImportMode === 'merge' ? 'text-emerald-800' : 'text-red-700'}`}>
                                                                 <input type="checkbox" checked={ioImportApplyTasks} onChange={(e) => setIoImportApplyTasks(e.target.checked)} disabled={!Array.isArray(ioImportPayload.tasks) || ioImportBusy} className="mt-0.5" />
-                                                                <span>套用 tasks 資料（⚠️ 會<strong>清空試算表現有資料</strong>後寫入匯入內容）</span>
+                                                                <span>
+                                                                    套用 tasks 資料（
+                                                                    {ioImportMode === 'merge'
+                                                                        ? <>會將 <strong>{Array.isArray(ioImportPayload.tasks) ? ioImportPayload.tasks.length : 0}</strong> 列<strong>追加</strong>到現有 <strong>{tasks.length}</strong> 列後（共 <strong>{(Array.isArray(ioImportPayload.tasks) ? ioImportPayload.tasks.length : 0) + tasks.length}</strong> 列）</>
+                                                                        : <>⚠️ 會<strong>清空試算表現有資料</strong>後寫入匯入內容</>
+                                                                    }
+                                                                    ）
+                                                                </span>
                                                             </label>
                                                         </div>
 
@@ -2418,9 +2480,9 @@ function sanitizeLabels_(input) {
                                                                 type="button"
                                                                 onClick={handleApplyImport}
                                                                 disabled={ioImportBusy || (!ioImportApplyTitle && !ioImportApplyLabels && !ioImportApplyTasks)}
-                                                                className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] flex items-center gap-1 ${(ioImportBusy || (!ioImportApplyTitle && !ioImportApplyLabels && !ioImportApplyTasks)) ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-red-600 text-white hover:bg-red-500"}`}
+                                                                className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] flex items-center gap-1 ${(ioImportBusy || (!ioImportApplyTitle && !ioImportApplyLabels && !ioImportApplyTasks)) ? "bg-slate-200 text-slate-400 cursor-not-allowed" : (ioImportMode === 'merge' ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-red-600 text-white hover:bg-red-500")}`}
                                                             >
-                                                                <Icon name="refresh-cw" size={14} /> {ioImportBusy ? "套用中…" : "套用匯入"}
+                                                                <Icon name="refresh-cw" size={14} /> {ioImportBusy ? "套用中…" : (ioImportMode === 'merge' ? "套用合併" : "套用覆寫")}
                                                             </button>
                                                             {ioImportStatus && <span className="text-[10px] font-bold text-emerald-700">{ioImportStatus}</span>}
                                                         </div>
