@@ -58,12 +58,225 @@
 <body class="bg-slate-50 text-slate-800 font-sans text-[12px]">
     <div id="root"></div>
 
+    <!--
+        Apps Script 範例程式碼。以 type="text/plain" 嵌入，瀏覽器不會執行；
+        前端 onboarding 指引從這個節點讀出，作為「一鍵複製到 Apps Script 編輯器」的內容來源。
+        若要更新後端邏輯，請同步修改這裡 + .git/App.gs.js + README 的 Apps Script 區塊。
+    -->
+    <script type="text/plain" id="app-gs-code">/**
+ * 處理 GET 請求：
+ *   - 預設：從表格讀取專案資料（JSON 陣列）
+ *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series/Phase/Site 設定 + 編輯密碼）
+ */
+function doGet(e) {
+  if (e && e.parameter && e.parameter.meta === '1') {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getActiveSheet();
+    const props = PropertiesService.getDocumentProperties();
+
+    let labels = null;
+    try {
+      const raw = props.getProperty('labels');
+      if (raw) labels = JSON.parse(raw);
+    } catch (err) {
+      labels = null;
+    }
+
+    const editPasswordRaw = props.getProperty('editPassword');
+    const editPassword = editPasswordRaw == null ? '' : String(editPasswordRaw);
+
+    const payload = {
+      title: ss.getName(),
+      sheetName: sheet.getName(),
+      labels: labels,
+      editPassword: editPassword,
+      updatedAt: new Date().toISOString()
+    };
+    return ContentService.createTextOutput(JSON.stringify(payload))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+
+  if (data.length <= 1) {
+    return ContentService.createTextOutput(JSON.stringify([]))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const headers = data.shift();
+  const json = data.map(row => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      if (row[i] instanceof Date) {
+        const d = row[i];
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        obj[h] = `${year}-${month}-${day}`;
+      } else {
+        obj[h] = row[i];
+      }
+    });
+    return obj;
+  });
+
+  return ContentService.createTextOutput(JSON.stringify(json))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 處理 POST 請求：
+ *   - { action: "setTitle", title }：重新命名整本試算表
+ *   - { action: "setLabels", labels }：儲存 Series/Phase/Site 設定（DocumentProperties）
+ *   - { action: "setEditPassword", password }：儲存編輯密碼（""/缺省 = 無密碼）
+ *   - 陣列 [...]：高效能整塊寫入專案資料
+ */
+function doPost(e) {
+  try {
+    const body = JSON.parse(e.postData.contents);
+
+    if (body && !Array.isArray(body) && body.action === 'setTitle') {
+      const newTitle = String(body.title || '').replace(/[\r\n]+/g, ' ').trim();
+      if (!newTitle) return ContentService.createTextOutput("Error: empty title");
+      if (newTitle.length > 120) return ContentService.createTextOutput("Error: title too long (>120)");
+      SpreadsheetApp.getActiveSpreadsheet().rename(newTitle);
+      return ContentService.createTextOutput("Success: renamed to " + newTitle);
+    }
+
+    if (body && !Array.isArray(body) && body.action === 'setLabels') {
+      const labels = body.labels;
+      if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+        return ContentService.createTextOutput("Error: invalid labels payload");
+      }
+      const sanitized = sanitizeLabels_(labels);
+      const json = JSON.stringify(sanitized);
+      if (json.length > 9000) {
+        return ContentService.createTextOutput("Error: labels payload too large");
+      }
+      PropertiesService.getDocumentProperties().setProperty('labels', json);
+      return ContentService.createTextOutput("Success: labels saved");
+    }
+
+    if (body && !Array.isArray(body) && body.action === 'setEditPassword') {
+      const props = PropertiesService.getDocumentProperties();
+      const raw = body.password == null ? '' : String(body.password);
+      const newPassword = raw.replace(/[\r\n]+/g, '').trim();
+      if (newPassword.length > 200) {
+        return ContentService.createTextOutput("Error: password too long (>200)");
+      }
+      if (newPassword === '') {
+        props.deleteProperty('editPassword');
+        return ContentService.createTextOutput("Success: edit password cleared");
+      }
+      props.setProperty('editPassword', newPassword);
+      return ContentService.createTextOutput("Success: edit password saved");
+    }
+
+    const tasks = Array.isArray(body) ? body : [];
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    sheet.clear();
+    if (tasks.length === 0) return ContentService.createTextOutput("Empty");
+
+    const headers = ["project", "category", "task", "type", "start", "end", "pic", "site"];
+    const values = [headers];
+    tasks.forEach(t => {
+      values.push([
+        String(t.project || ""),
+        String(t.category || ""),
+        String(t.task || ""),
+        String(t.type || ""),
+        String(t.start || ""),
+        String(t.end || ""),
+        String(t.pic || ""),
+        String(t.site || "")
+      ]);
+    });
+
+    sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+    return ContentService.createTextOutput("Success");
+  } catch (err) {
+    return ContentService.createTextOutput("Error: " + err.toString());
+  }
+}
+
+function sanitizeLabels_(input) {
+  const out = {};
+
+  if (Array.isArray(input.seriesList)) {
+    const seen = {};
+    out.seriesList = [];
+    input.seriesList.forEach(function (v) {
+      const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
+      if (!s || s.length > 120 || seen[s]) return;
+      seen[s] = true;
+      out.seriesList.push(s);
+    });
+  }
+
+  if (Array.isArray(input.siteList)) {
+    const seen = {};
+    out.siteList = [];
+    input.siteList.forEach(function (v) {
+      const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
+      if (!s || s.length > 120 || seen[s]) return;
+      seen[s] = true;
+      out.siteList.push(s);
+    });
+  }
+
+  if (input.seriesColors && typeof input.seriesColors === 'object' && !Array.isArray(input.seriesColors)) {
+    out.seriesColors = {};
+    Object.keys(input.seriesColors).forEach(function (name) {
+      const k = String(name || '').trim();
+      const c = String(input.seriesColors[name] || '').trim();
+      if (!k || k.length > 120) return;
+      if (!/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(c)) return;
+      out.seriesColors[k] = c.toLowerCase();
+    });
+  }
+
+  if (Array.isArray(input.phaseList)) {
+    const seen = {};
+    out.phaseList = [];
+    input.phaseList.forEach(function (p) {
+      if (!p || typeof p !== 'object') return;
+      const key = String(p.key || '').trim();
+      const label = String(p.label || '').replace(/[\r\n]+/g, ' ').trim();
+      const color = String(p.color || '').trim();
+      if (!key || key.length > 60 || seen[key]) return;
+      if (!label || label.length > 120) return;
+      if (!/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/.test(color)) return;
+      seen[key] = true;
+      out.phaseList.push({ key: key, label: label, color: color.toLowerCase() });
+    });
+  }
+
+  return out;
+}</script>
+
     <script type="text/babel">
         const { useState, useMemo, useEffect, useCallback, useRef } = React;
 
-        const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbzT2YXUNxWbmpoJHm8lU7GuyN__eSrYkfFCSrM6Te3AlO0Lks9ds4z_1SUQpVbLYFyyvQ/exec";
+        // 不再內建任何預設 GAS URL：每位使用者一律從自己的全新 Apps Script 開始。
         const GAS_URL_STORAGE_KEY = "monica-npi-gas-webapp-url";
 
+        // 從 <script type="text/plain" id="app-gs-code"> 取出嵌入的 App.gs.js 原文
+        // （用於 onboarding 指引的「一鍵複製到 Apps Script 編輯器」按鈕）。
+        const APP_GS_CODE = (() => {
+            try {
+                const el = document.getElementById('app-gs-code');
+                return (el?.textContent || '').replace(/^\s*\n/, '').replace(/\s+$/, '');
+            } catch (e) {
+                return '';
+            }
+        })();
+
+        // 只認網址列 ?gas= 參數作為起始來源；沒有就一律當「初次使用者」走 onboarding。
+        // localStorage 不再作為初始載入來源（避免上個使用者殘留的網址污染新使用者，
+        // 也避免「我剛剛刪掉設定要重新體驗 onboarding」卻被自動套回上次的 URL）。
+        // 為了讓「同一使用者自己設定後 refresh 仍可用」，applyGasUrlFromSettings 會用
+        // history.replaceState 把 ?gas=... 寫進當下網址列；下次 reload 一樣讀得到。
         const readInitialGasUrl = () => {
             try {
                 const q = new URLSearchParams(window.location.search).get("gas");
@@ -74,10 +287,6 @@
                         return decoded;
                     }
                 }
-            } catch (e) { /* ignore */ }
-            try {
-                const stored = localStorage.getItem(GAS_URL_STORAGE_KEY);
-                if (stored && stored.trim()) return stored.trim();
             } catch (e) { /* ignore */ }
             return "";
         };
@@ -136,24 +345,15 @@
             return s;
         };
 
-        const INITIAL_SERIES_LIST = ['Gen10', 'Gen11', 'Gen12 AMD', 'Gen12 Intel'];
+        // 全新使用者預設保持空清單（Series / Phase 必須由使用者自己在 Settings 內建立），
+        // Site 仍保留一組常見預設方便快速上手；雲端已有 labels 時會直接覆寫這些值。
+        const INITIAL_SERIES_LIST = [];
         const INITIAL_SITE_LIST = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
         const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
 
-        const INITIAL_SERIES_COLORS = {
-            'Gen10': '#cbd5e1',     // slate-300
-            'Gen11': '#bfdbfe',     // blue-200
-            'Gen12 AMD': '#fecaca', // red-200
-            'Gen12 Intel': '#a5f3fc'// cyan-200
-        };
+        const INITIAL_SERIES_COLORS = {};
 
-        const INITIAL_PHASE_LIST = [
-            { key: 'DevelopmentTNRS', label: 'Development (TN-RS)', color: '#facc15' },
-            { key: 'DevelopmentPI',   label: 'Development (PI) & Pre-golden start', color: '#f97316' },
-            { key: 'PreGolden',       label: 'Pre-golden Validation', color: '#3b82f6' },
-            { key: 'GoldenFPY',       label: 'Golden FPY', color: '#22c55e' },
-            { key: 'VB',              label: 'VB', color: '#b45309' }
-        ];
+        const INITIAL_PHASE_LIST = [];
 
         const DEFAULT_SERIES_COLOR = '#cbd5e1';
         const DEFAULT_PHASE_COLOR = '#94a3b8';
@@ -540,6 +740,7 @@
             const [settingsUrlError, setSettingsUrlError] = useState("");
             const [settingsTestOk, setSettingsTestOk] = useState("");
             const [shareLinkCopyMsg, setShareLinkCopyMsg] = useState("");
+            const [appGsCopyMsg, setAppGsCopyMsg] = useState("");
             const [headerShareLinkToast, setHeaderShareLinkToast] = useState("");
             const [editPassDraft, setEditPassDraft] = useState("");
             const [adminPassMsg, setAdminPassMsg] = useState("");
@@ -554,6 +755,55 @@
             const [chartTitleDraft, setChartTitleDraft] = useState("");
             const [displaySaveMsg, setDisplaySaveMsg] = useState("");
             const [displaySaveErr, setDisplaySaveErr] = useState("");
+
+            // Import / Export 分頁狀態
+            const [ioExportStatus, setIoExportStatus] = useState("");
+            const [ioImportFileName, setIoImportFileName] = useState("");
+            const [ioImportPayload, setIoImportPayload] = useState(null); // 已解析的 JSON 物件
+            const [ioImportError, setIoImportError] = useState("");
+            const [ioImportStatus, setIoImportStatus] = useState("");
+            const [ioImportBusy, setIoImportBusy] = useState(false);
+            const [ioImportApplyTitle, setIoImportApplyTitle] = useState(true);
+            const [ioImportApplyLabels, setIoImportApplyLabels] = useState(true);
+            const [ioImportApplyTasks, setIoImportApplyTasks] = useState(true);
+            const ioFileInputRef = useRef(null);
+
+            // 通用確認 modal（用於刪除等破壞性操作）
+            // body 可以是字串或 JSX；onConfirm 回傳後 modal 會自動關閉。
+            const [confirmModal, setConfirmModal] = useState({
+                open: false,
+                title: "",
+                body: null,
+                confirmLabel: "確定刪除",
+                tone: "danger",
+                onConfirm: null
+            });
+            const askConfirm = useCallback(({ title, body, confirmLabel, tone, onConfirm }) => {
+                setConfirmModal({
+                    open: true,
+                    title: title || "確認",
+                    body: body || null,
+                    confirmLabel: confirmLabel || "確定刪除",
+                    tone: tone || "danger",
+                    onConfirm: typeof onConfirm === 'function' ? onConfirm : null
+                });
+            }, []);
+            const closeConfirmModal = useCallback(() => {
+                setConfirmModal((c) => ({ ...c, open: false, onConfirm: null }));
+            }, []);
+            const runConfirm = useCallback(() => {
+                const fn = confirmModal.onConfirm;
+                closeConfirmModal();
+                if (typeof fn === 'function') fn();
+            }, [confirmModal.onConfirm, closeConfirmModal]);
+            useEffect(() => {
+                if (!confirmModal.open) return;
+                const onKey = (e) => {
+                    if (e.key === "Escape") closeConfirmModal();
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [confirmModal.open, closeConfirmModal]);
 
             const dynamicOptions = useMemo(() => {
                 const cats = new Set(seriesList);
@@ -947,6 +1197,7 @@
                 else if (tab === "admin") t = "admin";
                 else if (tab === "gas") t = "gas";
                 else if (tab === "display") t = "display";
+                else if (tab === "io") t = "io";
                 setSettingsTab(t);
                 setNewPhaseLabel("");
                 setNewPhaseColor("#94a3b8");
@@ -964,6 +1215,12 @@
                 setVisibleDaysBeforeDraft(String(visibleDaysBefore));
                 setVisibleDaysAfterDraft(String(visibleDaysAfter));
                 setChartTitleDraft(remoteChartTitle);
+                setIoExportStatus("");
+                setIoImportError("");
+                setIoImportStatus("");
+                setIoImportPayload(null);
+                setIoImportFileName("");
+                if (ioFileInputRef.current) ioFileInputRef.current.value = "";
                 setShowSettingsModal(true);
             };
 
@@ -1011,6 +1268,194 @@
                 }
             }, [gasUrl]);
 
+            const copyAppGsCode = useCallback(async () => {
+                if (!APP_GS_CODE) {
+                    setAppGsCopyMsg("找不到內嵌程式碼，請改至 README 複製。");
+                    setTimeout(() => setAppGsCopyMsg(""), 3500);
+                    return;
+                }
+                try {
+                    await navigator.clipboard.writeText(APP_GS_CODE);
+                    setAppGsCopyMsg("已複製，請貼到 Apps Script 編輯器並儲存");
+                    setTimeout(() => setAppGsCopyMsg(""), 3500);
+                } catch (e) {
+                    setAppGsCopyMsg("");
+                    try {
+                        window.prompt("自動複製失敗，請手動複製以下程式碼：", APP_GS_CODE);
+                    } catch (_) { /* ignore */ }
+                }
+            }, []);
+
+            // ---- Import / Export 處理 ----
+
+            const buildExportFilename = () => {
+                const safeTitle = String(effectiveChartTitle || "monica-npi")
+                    .replace(/[\\/:*?"<>|]/g, '')
+                    .replace(/\s+/g, '-')
+                    .slice(0, 60) || "monica-npi";
+                const now = new Date();
+                const pad = (n) => String(n).padStart(2, '0');
+                const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+                return `${safeTitle}-${stamp}.json`;
+            };
+
+            const handleExportData = useCallback(() => {
+                setIoExportStatus("");
+                try {
+                    const payload = {
+                        schemaVersion: 1,
+                        exportedAt: new Date().toISOString(),
+                        title: effectiveChartTitle,
+                        labels: {
+                            seriesList,
+                            siteList,
+                            seriesColors,
+                            phaseList
+                        },
+                        tasks: Array.isArray(tasks) ? tasks : []
+                    };
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = buildExportFilename();
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    setIoExportStatus(`已匯出 ${Array.isArray(tasks) ? tasks.length : 0} 筆 task 與 labels 設定。`);
+                    setTimeout(() => setIoExportStatus(""), 4000);
+                } catch (err) {
+                    setIoExportStatus("匯出失敗：" + (err && err.message ? err.message : String(err)));
+                }
+            }, [effectiveChartTitle, seriesList, siteList, seriesColors, phaseList, tasks]);
+
+            const resetImportState = () => {
+                setIoImportPayload(null);
+                setIoImportFileName("");
+                setIoImportError("");
+                setIoImportStatus("");
+                if (ioFileInputRef.current) ioFileInputRef.current.value = "";
+            };
+
+            const handleImportFileChange = (e) => {
+                setIoImportError("");
+                setIoImportStatus("");
+                setIoImportPayload(null);
+                const file = e.target.files && e.target.files[0];
+                if (!file) {
+                    setIoImportFileName("");
+                    return;
+                }
+                setIoImportFileName(file.name);
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const text = String(reader.result || "");
+                        const data = JSON.parse(text);
+                        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                            setIoImportError("檔案內容不是預期的 JSON 物件結構。");
+                            return;
+                        }
+                        // 至少要有 labels / tasks / title 三者其中之一
+                        const hasAny = (data.title && typeof data.title === 'string')
+                            || (data.labels && typeof data.labels === 'object')
+                            || Array.isArray(data.tasks);
+                        if (!hasAny) {
+                            setIoImportError("檔案內看不到任何可匯入的欄位（需要 title / labels / tasks 其中之一）。");
+                            return;
+                        }
+                        setIoImportPayload(data);
+                        // 視內容自動勾選對應 checkbox
+                        setIoImportApplyTitle(typeof data.title === 'string' && !!data.title.trim());
+                        setIoImportApplyLabels(!!(data.labels && typeof data.labels === 'object'));
+                        setIoImportApplyTasks(Array.isArray(data.tasks));
+                    } catch (err) {
+                        setIoImportError("JSON 解析失敗：" + (err && err.message ? err.message : String(err)));
+                    }
+                };
+                reader.onerror = () => setIoImportError("讀取檔案失敗。");
+                reader.readAsText(file);
+            };
+
+            const handleApplyImport = useCallback(async () => {
+                if (!ioImportPayload) return;
+                const base = normalizeGasUrl(gasUrl);
+                if (!base) {
+                    setIoImportError("請先於 GAS URL 分頁設定 Web App URL，再執行匯入。");
+                    return;
+                }
+                setIoImportError("");
+                setIoImportStatus("");
+                setIoImportBusy(true);
+
+                const data = ioImportPayload;
+                const summary = [];
+
+                try {
+                    // 1) Title
+                    if (ioImportApplyTitle && typeof data.title === 'string' && data.title.trim()) {
+                        const nextTitle = data.title.trim().slice(0, 120);
+                        try {
+                            await fetch(base, {
+                                method: 'POST',
+                                mode: 'no-cors',
+                                body: JSON.stringify({ action: 'setTitle', title: nextTitle })
+                            });
+                            setRemoteChartTitle(nextTitle);
+                            setChartTitleDraft(nextTitle);
+                            summary.push(`title: "${nextTitle}"`);
+                        } catch (err) {
+                            summary.push(`title 寫入失敗`);
+                        }
+                    }
+
+                    // 2) Labels（Series / Phase / Site / 顏色）
+                    if (ioImportApplyLabels && data.labels && typeof data.labels === 'object') {
+                        const built = buildLabelsFromAny(data.labels);
+                        setSeriesList(built.seriesList);
+                        setSiteList(built.siteList);
+                        setSeriesColors(built.seriesColors);
+                        setPhaseList(built.phaseList);
+                        const ok = await saveLabelsToSheet({
+                            seriesList: built.seriesList,
+                            siteList: built.siteList,
+                            seriesColors: built.seriesColors,
+                            phaseList: built.phaseList
+                        });
+                        summary.push(`labels: ${built.seriesList.length} series / ${built.phaseList.length} phases / ${built.siteList.length} sites${ok ? "" : "（寫入失敗）"}`);
+                    }
+
+                    // 3) Tasks（覆寫整本試算表）
+                    if (ioImportApplyTasks && Array.isArray(data.tasks)) {
+                        try {
+                            await fetch(base, {
+                                method: 'POST',
+                                mode: 'no-cors',
+                                body: JSON.stringify(data.tasks)
+                            });
+                            summary.push(`tasks: 已寫入 ${data.tasks.length} 列（會在數秒後自動重新整理）`);
+                            // 4 秒後重新拉雲端資料，讓畫面同步
+                            setTimeout(() => { fetchFromSheets(); }, 4000);
+                        } catch (err) {
+                            summary.push(`tasks 寫入失敗`);
+                        }
+                    }
+
+                    if (summary.length === 0) {
+                        setIoImportStatus("未勾選任何項目，沒有套用。");
+                    } else {
+                        setIoImportStatus("匯入完成 — " + summary.join('；') + "。");
+                        // 重新拉 meta（title + labels）以確保 UI 一致
+                        setTimeout(() => { fetchRemoteMeta(); }, 3500);
+                    }
+                } catch (err) {
+                    setIoImportError("匯入過程出錯：" + (err && err.message ? err.message : String(err)));
+                } finally {
+                    setIoImportBusy(false);
+                }
+            }, [ioImportPayload, ioImportApplyTitle, ioImportApplyLabels, ioImportApplyTasks, gasUrl, saveLabelsToSheet, fetchFromSheets, fetchRemoteMeta]);
+
             const testDraftGasUrl = async () => {
                 const normalized = normalizeGasUrl(gasUrlDraft);
                 setSettingsTestOk("");
@@ -1047,15 +1492,14 @@
                     return;
                 }
                 try { localStorage.setItem(GAS_URL_STORAGE_KEY, normalized); } catch (e) { /* ignore */ }
+                // 同時把 ?gas=... 寫進當下網址列，這樣 reload / 加書籤都能保留此 GAS Web App，
+                // 不會因為 readInitialGasUrl 不再讀 localStorage 而每次都回到 onboarding。
+                try {
+                    const u = new URL(window.location.href);
+                    u.searchParams.set("gas", normalized);
+                    window.history.replaceState({}, "", u.toString());
+                } catch (e) { /* ignore */ }
                 setGasUrl(normalized);
-                setSettingsUrlError("");
-                setSettingsTestOk("");
-            };
-
-            const resetGasUrlToDefault = () => {
-                try { localStorage.removeItem(GAS_URL_STORAGE_KEY); } catch (e) { /* ignore */ }
-                setGasUrl(DEFAULT_GAS_URL);
-                setGasUrlDraft(DEFAULT_GAS_URL);
                 setSettingsUrlError("");
                 setSettingsTestOk("");
             };
@@ -1368,8 +1812,33 @@
 
                     {/* New Project Control */}
                     {isEditMode && (
-                        <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex justify-end shrink-0 z-[400]">
-                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: seriesList[0] || "", pic: DEFAULT_PICS[0] || "", site: siteList[0] || "", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
+                        <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex flex-wrap items-center justify-end gap-3 shrink-0 z-[400]">
+                            {(seriesList.length === 0 || phaseList.length === 0) && (
+                                <p className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mr-auto">
+                                    請先到 <strong>Settings</strong> →
+                                    {seriesList.length === 0 && <> <strong>Series</strong></>}
+                                    {(seriesList.length === 0 && phaseList.length === 0) && " / "}
+                                    {phaseList.length === 0 && <> <strong>Phase</strong></>}
+                                    {" "}新增至少一個項目，才能建立 Project。
+                                </p>
+                            )}
+                            <button
+                                onClick={() => {
+                                    const firstPhaseKey = phaseList[0]?.key || "";
+                                    setOriginalProjectName(null);
+                                    setModalData({
+                                        project: "",
+                                        category: seriesList[0] || "",
+                                        pic: DEFAULT_PICS[0] || "",
+                                        site: siteList[0] || "",
+                                        phases: [{ localId: Date.now(), task: "", type: firstPhaseKey, start: formatDate(new Date()), end: formatDate(new Date()) }]
+                                    });
+                                    setShowModal(true);
+                                }}
+                                disabled={seriesList.length === 0 || phaseList.length === 0}
+                                title={(seriesList.length === 0 || phaseList.length === 0) ? "請先到 Settings 新增 Series / Phase" : ""}
+                                className={`px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md transition-all uppercase tracking-tighter font-sans ${(seriesList.length === 0 || phaseList.length === 0) ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`}
+                            >
                                 <Icon name="plus" size={14} className="inline mr-1" /> New Project
                             </button>
                         </div>
@@ -1502,6 +1971,40 @@
                     </div>
 
                     {/* Settings: Admin + Options */}
+                    {confirmModal.open && (
+                        <div
+                            className="fixed inset-0 z-[6100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 font-sans"
+                            onClick={(e) => { if (e.target === e.currentTarget) closeConfirmModal(); }}
+                        >
+                            <div className="bg-white rounded-2xl shadow-2xl border-2 border-slate-200 w-[460px] max-w-full overflow-hidden">
+                                <div className={`px-5 py-3 flex items-center justify-between text-white ${confirmModal.tone === "danger" ? "bg-red-600" : "bg-slate-900"}`}>
+                                    <div className="flex items-center gap-2 font-black uppercase text-[12px] tracking-wider">
+                                        <Icon name={confirmModal.tone === "danger" ? "x" : "settings"} size={16} />
+                                        {confirmModal.title}
+                                    </div>
+                                    <button type="button" onClick={closeConfirmModal} className="text-white/80 hover:text-white p-1" aria-label="Close">
+                                        <Icon name="x" size={18} />
+                                    </button>
+                                </div>
+                                <div className="p-5 space-y-4">
+                                    <div className="text-[12px] font-bold text-slate-800 leading-relaxed">
+                                        {confirmModal.body}
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-1">
+                                        <button type="button" onClick={closeConfirmModal} className="px-4 py-1.5 bg-slate-100 text-slate-700 font-black rounded-lg uppercase text-[10px] hover:bg-slate-200">取消</button>
+                                        <button
+                                            type="button"
+                                            autoFocus
+                                            onClick={runConfirm}
+                                            className={`px-4 py-1.5 text-white font-black rounded-lg uppercase text-[10px] flex items-center gap-1 ${confirmModal.tone === "danger" ? "bg-red-600 hover:bg-red-500" : "bg-slate-900 hover:bg-blue-600"}`}
+                                        >
+                                            {confirmModal.confirmLabel}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {showLockGate && (
                         <div
                             className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 font-sans"
@@ -1563,7 +2066,7 @@
                                     {normalizeGasUrl(gasUrl) ? (
                                         <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
                                     ) : (
-                                        <span className="text-[10px] text-amber-700 font-black text-right max-w-[11rem] leading-tight">請先於「GAS URL」分頁貼上網址並儲存，或按「還原內建預設網址」後再關閉。</span>
+                                        <span className="text-[10px] text-amber-700 font-black text-right max-w-[11rem] leading-tight">請先於「GAS URL」分頁依指引貼上你自己的網址並儲存後再關閉。</span>
                                     )}
                                 </div>
                                 <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
@@ -1572,6 +2075,7 @@
                                     <button type="button" onClick={() => { setSettingsTab("phase"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "phase" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Phase</button>
                                     <button type="button" onClick={() => { setSettingsTab("site"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "site" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Site</button>
                                     <button type="button" onClick={() => { setSettingsTab("admin"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
+                                    <button type="button" onClick={() => { setSettingsTab("io"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "io" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Import / Export</button>
                                     <button type="button" onClick={() => { setSettingsTab("gas"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
                                 </div>
                                 <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
@@ -1654,7 +2158,22 @@
                                                                     <span className="px-2 py-0.5 rounded border text-[10px] font-black truncate" style={seriesTagStyle(name, seriesColors)}>{name}</span>
                                                                     <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0">{hex}</span>
                                                                 </div>
-                                                                <button type="button" onClick={() => removeSeriesItem(name)} disabled={seriesList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => askConfirm({
+                                                                        title: "刪除 Series",
+                                                                        body: (
+                                                                            <>
+                                                                                確定要從清單中刪除 Series <strong className="text-slate-900">"{name}"</strong>？
+                                                                                <br />
+                                                                                <span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者；試算表內已使用此 Series 的 task 資料不會被刪除，只是從下拉選單中移除。</span>
+                                                                            </>
+                                                                        ),
+                                                                        onConfirm: () => removeSeriesItem(name)
+                                                                    })}
+                                                                    disabled={seriesList.length <= 1}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                >刪除</button>
                                                             </li>
                                                         );
                                                     })}
@@ -1691,7 +2210,22 @@
                                                                 <span className="inline-block w-2.5 h-2.5 rounded-sm border shrink-0" style={{ backgroundColor: hex, borderColor: 'rgba(15,23,42,0.4)' }}></span>
                                                                 <input value={info.label} onChange={(e) => updatePhaseLabel(info.key, e.target.value)} className="flex-1 min-w-0 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-black text-slate-800 outline-none focus:border-blue-500" maxLength={120} />
                                                                 <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0 hidden sm:inline">{info.key}</span>
-                                                                <button type="button" onClick={() => removePhaseItem(info.key)} disabled={phaseList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${phaseList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => askConfirm({
+                                                                        title: "刪除 Phase",
+                                                                        body: (
+                                                                            <>
+                                                                                確定要從清單中刪除 Phase <strong className="text-slate-900">"{info.label}"</strong>（key：<code className="bg-slate-100 px-1 rounded">{info.key}</code>）？
+                                                                                <br />
+                                                                                <span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者；試算表內已使用此 Phase 的 task 資料不會被刪除，但會以預設樣式呈現直到你重新建立同名 key。</span>
+                                                                            </>
+                                                                        ),
+                                                                        onConfirm: () => removePhaseItem(info.key)
+                                                                    })}
+                                                                    disabled={phaseList.length <= 1}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${phaseList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                >刪除</button>
                                                             </li>
                                                         );
                                                     })}
@@ -1721,7 +2255,22 @@
                                                     {siteList.map((name) => (
                                                         <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                             <span className="font-mono text-slate-800">{name}</span>
-                                                            <button type="button" onClick={() => removeSiteItem(name)} disabled={siteList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => askConfirm({
+                                                                    title: "刪除 Site",
+                                                                    body: (
+                                                                        <>
+                                                                            確定要從清單中刪除 Site <strong className="text-slate-900">"{name}"</strong>？
+                                                                            <br />
+                                                                            <span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者；試算表內已使用此 Site 的 task 資料不會被刪除，只是從下拉選單中移除。</span>
+                                                                        </>
+                                                                    ),
+                                                                    onConfirm: () => removeSiteItem(name)
+                                                                })}
+                                                                disabled={siteList.length <= 1}
+                                                                className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                            >刪除</button>
                                                         </li>
                                                     ))}
                                                 </ul>
@@ -1767,17 +2316,163 @@
                                             </section>
                                         </>
                                     )}
+                                    {settingsTab === "io" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2"><Icon name="spreadsheet" size={16} /> Import / Export · 備份與快速建置</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    把目前甘特圖的<strong>標題、Series / Phase / Site / 顏色設定、以及所有 task 資料</strong>打包下載成單一 JSON 檔；之後可以匯入回同一支或另一支 GAS Web App，用來備份、複製範本給其他同事、或在切換試算表時快速搬移。
+                                                    <br />
+                                                    為了安全考量，<strong>編輯密碼不會包含在匯出檔案中</strong>。
+                                                </p>
+                                            </section>
+
+                                            {/* Export */}
+                                            <section className="space-y-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/60 p-4">
+                                                <h5 className="text-[12px] font-black text-emerald-900 flex items-center gap-2"><Icon name="folder-open" size={14} /> 匯出</h5>
+                                                <p className="text-[10px] text-emerald-900/90 font-bold leading-relaxed">
+                                                    產生並下載 <code className="bg-white/80 px-1 rounded border border-emerald-200">.json</code> 檔。檔名為 <code className="bg-white/80 px-1 rounded border border-emerald-200">{`<chart 標題>-YYYYMMDD-HHmm.json`}</code>。
+                                                </p>
+                                                <div className="text-[10px] text-emerald-900 font-bold pl-1">
+                                                    目前狀態：
+                                                    <span className="ml-1 font-mono">{seriesList.length}</span> series ·
+                                                    <span className="ml-1 font-mono">{phaseList.length}</span> phases ·
+                                                    <span className="ml-1 font-mono">{siteList.length}</span> sites ·
+                                                    <span className="ml-1 font-mono">{Array.isArray(tasks) ? tasks.length : 0}</span> tasks
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleExportData}
+                                                        disabled={!normalizeGasUrl(gasUrl)}
+                                                        className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] flex items-center gap-1 ${normalizeGasUrl(gasUrl) ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-slate-200 text-slate-400 cursor-not-allowed"}`}
+                                                    >
+                                                        <Icon name="spreadsheet" size={14} /> 下載 JSON
+                                                    </button>
+                                                    {ioExportStatus && <span className="text-[10px] font-bold text-emerald-800">{ioExportStatus}</span>}
+                                                </div>
+                                            </section>
+
+                                            {/* Import */}
+                                            <section className="space-y-3 rounded-xl border-2 border-amber-200 bg-amber-50/60 p-4">
+                                                <h5 className="text-[12px] font-black text-amber-900 flex items-center gap-2"><Icon name="refresh-cw" size={14} /> 匯入</h5>
+                                                <p className="text-[10px] text-amber-900/90 font-bold leading-relaxed">
+                                                    選擇先前匯出的 <code className="bg-white/80 px-1 rounded border border-amber-200">.json</code> 檔，或具備相同結構的範本檔。載入後可勾選要套用的部分再執行。
+                                                </p>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <label className="inline-flex items-center gap-2">
+                                                        <input
+                                                            ref={ioFileInputRef}
+                                                            type="file"
+                                                            accept=".json,application/json"
+                                                            onChange={handleImportFileChange}
+                                                            disabled={ioImportBusy}
+                                                            className="text-[10px] file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-900 file:text-white file:font-black file:uppercase file:text-[10px] file:hover:bg-blue-600 file:cursor-pointer"
+                                                        />
+                                                    </label>
+                                                    {ioImportFileName && <span className="text-[10px] font-mono text-slate-700 break-all">{ioImportFileName}</span>}
+                                                    {(ioImportPayload || ioImportFileName) && (
+                                                        <button type="button" onClick={resetImportState} disabled={ioImportBusy} className="ml-auto px-2 py-1 text-[10px] font-black text-slate-500 hover:text-slate-800 underline">清除</button>
+                                                    )}
+                                                </div>
+                                                {ioImportError && <p className="text-red-600 text-[10px] font-bold bg-red-50 border border-red-200 rounded px-2 py-1.5">{ioImportError}</p>}
+
+                                                {ioImportPayload && (
+                                                    <div className="space-y-3 pt-1 border-t border-amber-200/60">
+                                                        <div className="rounded-lg bg-white/80 border border-amber-200 p-3 space-y-1">
+                                                            <div className="text-[9px] font-black uppercase text-amber-700 tracking-wider">檔案內容摘要</div>
+                                                            <ul className="text-[10px] font-bold text-slate-700 space-y-0.5">
+                                                                <li>標題：<span className="font-mono">{typeof ioImportPayload.title === 'string' ? `"${ioImportPayload.title}"` : <em className="text-slate-400">無</em>}</span></li>
+                                                                <li>Labels：
+                                                                    {ioImportPayload.labels && typeof ioImportPayload.labels === 'object' ? (
+                                                                        <span className="ml-1">
+                                                                            <span className="font-mono">{Array.isArray(ioImportPayload.labels.seriesList) ? ioImportPayload.labels.seriesList.length : 0}</span> series ·
+                                                                            <span className="ml-1 font-mono">{Array.isArray(ioImportPayload.labels.phaseList) ? ioImportPayload.labels.phaseList.length : 0}</span> phases ·
+                                                                            <span className="ml-1 font-mono">{Array.isArray(ioImportPayload.labels.siteList) ? ioImportPayload.labels.siteList.length : 0}</span> sites
+                                                                        </span>
+                                                                    ) : <em className="text-slate-400 ml-1">無</em>}
+                                                                </li>
+                                                                <li>Tasks：<span className="font-mono">{Array.isArray(ioImportPayload.tasks) ? ioImportPayload.tasks.length : 0}</span> 列</li>
+                                                                {ioImportPayload.exportedAt && <li>匯出時間：<span className="font-mono text-slate-500">{ioImportPayload.exportedAt}</span></li>}
+                                                            </ul>
+                                                        </div>
+
+                                                        <div className="space-y-1.5">
+                                                            <div className="text-[9px] font-black uppercase text-amber-700 tracking-wider">套用範圍</div>
+                                                            <label className="flex items-start gap-2 text-[11px] font-bold text-slate-700">
+                                                                <input type="checkbox" checked={ioImportApplyTitle} onChange={(e) => setIoImportApplyTitle(e.target.checked)} disabled={!(typeof ioImportPayload.title === 'string' && ioImportPayload.title.trim()) || ioImportBusy} className="mt-0.5" />
+                                                                <span>套用試算表標題</span>
+                                                            </label>
+                                                            <label className="flex items-start gap-2 text-[11px] font-bold text-slate-700">
+                                                                <input type="checkbox" checked={ioImportApplyLabels} onChange={(e) => setIoImportApplyLabels(e.target.checked)} disabled={!(ioImportPayload.labels && typeof ioImportPayload.labels === 'object') || ioImportBusy} className="mt-0.5" />
+                                                                <span>套用 Series / Phase / Site / 顏色（會<strong>覆寫</strong>目前雲端設定）</span>
+                                                            </label>
+                                                            <label className="flex items-start gap-2 text-[11px] font-bold text-red-700">
+                                                                <input type="checkbox" checked={ioImportApplyTasks} onChange={(e) => setIoImportApplyTasks(e.target.checked)} disabled={!Array.isArray(ioImportPayload.tasks) || ioImportBusy} className="mt-0.5" />
+                                                                <span>套用 tasks 資料（⚠️ 會<strong>清空試算表現有資料</strong>後寫入匯入內容）</span>
+                                                            </label>
+                                                        </div>
+
+                                                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleApplyImport}
+                                                                disabled={ioImportBusy || (!ioImportApplyTitle && !ioImportApplyLabels && !ioImportApplyTasks)}
+                                                                className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] flex items-center gap-1 ${(ioImportBusy || (!ioImportApplyTitle && !ioImportApplyLabels && !ioImportApplyTasks)) ? "bg-slate-200 text-slate-400 cursor-not-allowed" : "bg-red-600 text-white hover:bg-red-500"}`}
+                                                            >
+                                                                <Icon name="refresh-cw" size={14} /> {ioImportBusy ? "套用中…" : "套用匯入"}
+                                                            </button>
+                                                            {ioImportStatus && <span className="text-[10px] font-bold text-emerald-700">{ioImportStatus}</span>}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </section>
+
+                                            <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                                <h5 className="text-[10px] font-black uppercase text-slate-500 tracking-wider">JSON 結構（schemaVersion 1）</h5>
+                                                <pre className="text-[10px] font-mono text-slate-700 bg-white border border-slate-200 rounded p-2 overflow-auto custom-scrollbar leading-relaxed whitespace-pre">{`{
+  "schemaVersion": 1,
+  "exportedAt": "<ISO 時間>",
+  "title": "<試算表檔名>",
+  "labels": {
+    "seriesList": [...],
+    "siteList":   [...],
+    "seriesColors": { "<name>": "#hex", ... },
+    "phaseList":  [ { "key", "label", "color" }, ... ]
+  },
+  "tasks": [ { "project","category","task","type","start","end","pic","site" }, ... ]
+}`}</pre>
+                                                <p className="text-[9px] text-slate-500 font-bold leading-relaxed">
+                                                    匯入時各區塊可獨立勾選，遺漏的欄位會被忽略；不認識的欄位也會被丟棄。Labels 經過與一般 UI 相同的 sanitize 流程處理。
+                                                </p>
+                                            </section>
+                                        </>
+                                    )}
                                     {settingsTab === "gas" && (
                                         <>
                                             <section className="space-y-3">
                                                 <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2"><Icon name="database" size={16} /> Google Apps Script · Web App URL</h4>
+                                                {!normalizeGasUrl(gasUrl) && (
+                                                    <div className="rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50 p-4 shadow-sm">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="shrink-0 w-9 h-9 rounded-full bg-amber-500 text-white flex items-center justify-center font-black text-lg">!</div>
+                                                            <div className="space-y-1">
+                                                                <div className="text-[13px] font-black text-amber-900">第一次使用？歡迎！</div>
+                                                                <p className="text-[11px] text-amber-900 font-bold leading-relaxed">
+                                                                    這個甘特圖需要一個你<strong>自己的 Google Apps Script</strong>當作後端，才能讀寫資料。
+                                                                    我們不知道你的 Google 帳號、也不會幫你保管資料；以下 <strong>7 個步驟</strong>會帶你從零建立屬於你的 GAS Web App，全程約 5 分鐘。
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
                                                     每位使用者可在這裡貼上<strong>自己的</strong>部署網址（結尾為 <code className="bg-slate-100 px-1 rounded">/exec</code>），此瀏覽器會記住網址並向對應的試算表讀寫資料。
                                                 </p>
                                                 <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/80 p-3 space-y-2">
                                                     <div className="text-[9px] font-black uppercase text-emerald-800 tracking-wider">目前使用中的網址</div>
                                                     <div className="text-[10px] font-mono text-emerald-950 break-all leading-relaxed">
-                                                        {normalizeGasUrl(gasUrl) || <span className="text-amber-700 font-sans">（尚未設定 — 請在下方貼上網址並儲存）</span>}
+                                                        {normalizeGasUrl(gasUrl) || <span className="text-amber-700 font-sans">（尚未設定 — 請依下方指引完成 Step 1~3，再於 Step 4 貼上網址並儲存）</span>}
                                                     </div>
                                                 </div>
                                                 {normalizeGasUrl(gasUrl) && (
@@ -1795,21 +2490,146 @@
                                                     </div>
                                                 )}
                                             </section>
-                                            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                                <h4 className="text-[11px] font-black text-slate-700 border-b border-slate-200 pb-2">如何建立專屬 GAS Web App 網址（初學指引）</h4>
-                                                <ol className="list-decimal pl-4 space-y-2 text-[10px] text-slate-700 font-bold leading-relaxed">
-                                                    <li>在 Google 雲端硬碟<strong>建立一個試算表</strong>（或開啟既有試算表），作為你的資料庫。</li>
-                                                    <li>試算表中依本工具需要的欄位建立資料（或複製公版試算表結構）。</li>
-                                                    <li>選單<strong>「擴充功能」→「Apps Script」</strong>，開啟指令碼編輯器；撰寫或貼上與本頁相容的程式（需實作讀取試算表並以 JSON 陣列回傳、以及接收 POST 寫回等邏輯 — 請參考專案 README 或公版 Apps Script 範本）。</li>
-                                                    <li>在編輯器右上角點<strong>「部署」→「新增部署作業」</strong>，類型選<strong>「網頁應用程式」</strong>。</li>
-                                                    <li>「執行身分」通常選<strong>「我」</strong>；「具有存取權的使用者」依需求選<strong>「所有人」</strong>或僅限機構成員（注意：任何人可存取時請勿放敏感資料）。</li>
-                                                    <li>部署完成後，複製<strong>「網頁應用程式」網址</strong>，確認格式為 <code className="bg-white px-1 rounded border">https://script.google.com/macros/s/…/exec</code>。</li>
-                                                    <li>將網址貼到下方欄位，先按<strong>「測試網址」</strong>確認會回傳 JSON 陣列，再按<strong>「儲存並連線」</strong>。之後同一瀏覽器會自動使用此網址。</li>
-                                                </ol>
-                                                <p className="text-[9px] text-slate-500 font-bold pt-1 border-t border-slate-200">若更換試算表僅需在同一 Apps Script 專案中改連結的表，通常不必改網址；若新建了另一個 Script 專案並重新部署，才需要換新的 <code className="bg-white px-0.5 rounded">/exec</code> 網址。</p>
-                                            </section>
+
+                                            <details open={!normalizeGasUrl(gasUrl)} className="group rounded-xl border-2 border-slate-200 bg-slate-50/60">
+                                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center gap-2 text-[12px] font-black text-slate-800 hover:bg-slate-100/80 rounded-xl">
+                                                    <Icon name="folder-open" size={16} className="text-blue-600" />
+                                                    新使用者完整上手指南（7 個步驟）
+                                                    <span className="ml-auto text-[10px] font-bold text-slate-500 group-open:hidden">點此展開</span>
+                                                    <span className="ml-auto text-[10px] font-bold text-slate-500 hidden group-open:inline">點此收合</span>
+                                                </summary>
+                                                <div className="px-4 pb-4 pt-2 space-y-4">
+
+                                                    {/* Step 1 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">1</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">準備一張全新空白的 Google 試算表</h5>
+                                                        </div>
+                                                        <ol className="list-decimal pl-9 space-y-1 text-[11px] text-slate-700 font-bold leading-relaxed">
+                                                            <li>進入 <a href="https://drive.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Google Drive</a>。</li>
+                                                            <li>左上角 <code className="bg-slate-100 px-1 rounded">+ 新增</code> → <code className="bg-slate-100 px-1 rounded">Google 試算表 → 空白試算表</code>。</li>
+                                                            <li>給它一個名字（例如 <code className="bg-slate-100 px-1 rounded">Monica NPI 排程</code>）—— 這個名字之後<strong>就是甘特圖的標題</strong>，可隨時改。</li>
+                                                            <li><strong>保持完全空白</strong>，不要手動建任何 header 或資料列。</li>
+                                                        </ol>
+                                                        <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed">
+                                                            ⚠️ 每次儲存資料時 GAS 會先 <code className="bg-white px-1 rounded">sheet.clear()</code> 整張清空再重寫。<strong>請務必用一張新空白試算表</strong>，不要綁到含其他資料的表格。
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Step 2 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">2</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">安裝 Apps Script 程式碼</h5>
+                                                        </div>
+                                                        <ol className="list-decimal pl-9 space-y-1 text-[11px] text-slate-700 font-bold leading-relaxed">
+                                                            <li>在剛建的試算表中選單 <code className="bg-slate-100 px-1 rounded">擴充功能 → Apps Script</code>。</li>
+                                                            <li>新分頁會打開 Apps Script 編輯器，預設有一個 <code className="bg-slate-100 px-1 rounded">Code.gs</code> 內含 <code className="bg-slate-100 px-1 rounded">function myFunction() {'{}'}</code> 範例。<strong>把預設內容整個刪除</strong>。</li>
+                                                            <li>按下方<strong>「複製 GAS 程式碼」</strong>按鈕，貼到剛清空的編輯器。</li>
+                                                            <li>按 <kbd className="bg-slate-100 px-1 rounded border border-slate-300 text-[10px]">Ctrl+S</kbd>（或左上角磁碟圖示）儲存。可順手把專案標題改成例如 <code className="bg-slate-100 px-1 rounded">Monica NPI API</code>。</li>
+                                                        </ol>
+                                                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                            <button type="button" onClick={copyAppGsCode} className="px-3 py-1.5 bg-emerald-600 text-white font-black rounded-lg hover:bg-emerald-500 transition-all text-[11px] flex items-center gap-1">
+                                                                <Icon name="spreadsheet" size={14} /> 複製 GAS 程式碼到剪貼簿
+                                                            </button>
+                                                            {appGsCopyMsg && <span className="text-[10px] font-bold text-emerald-700">{appGsCopyMsg}</span>}
+                                                        </div>
+                                                        <details className="rounded border border-slate-200 bg-slate-50/80 mt-1">
+                                                            <summary className="cursor-pointer px-2 py-1 text-[10px] font-black text-slate-600 hover:bg-slate-100">點此預覽程式碼內容（{APP_GS_CODE.split('\n').length} 行）</summary>
+                                                            <pre className="m-0 p-3 text-[10px] font-mono text-slate-800 bg-white max-h-72 overflow-auto custom-scrollbar leading-relaxed whitespace-pre">{APP_GS_CODE}</pre>
+                                                        </details>
+                                                    </div>
+
+                                                    {/* Step 3 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">3</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">部署為 Web App 並取得 URL</h5>
+                                                        </div>
+                                                        <ol className="list-decimal pl-9 space-y-1 text-[11px] text-slate-700 font-bold leading-relaxed">
+                                                            <li>Apps Script 編輯器右上角 → <code className="bg-slate-100 px-1 rounded">部署 → 新增部署作業</code>。</li>
+                                                            <li>左側齒輪 → 選 <code className="bg-slate-100 px-1 rounded">網頁應用程式</code>。</li>
+                                                            <li>填寫：
+                                                                <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                                                                    <li><strong>說明</strong>：任意（例如 <code className="bg-slate-100 px-1 rounded">v1</code>）。</li>
+                                                                    <li><strong>執行身分</strong>：<code className="bg-slate-100 px-1 rounded">我（你的 Google 帳號）</code>。</li>
+                                                                    <li><strong>誰可以存取</strong>：完全公開、所有人不必登入 → <code className="bg-slate-100 px-1 rounded">任何人</code>；想限制只有登入帳號 → <code className="bg-slate-100 px-1 rounded">任何 Google 帳號</code>；最嚴格 → <code className="bg-slate-100 px-1 rounded">只有我</code>。</li>
+                                                                </ul>
+                                                            </li>
+                                                            <li>按 <code className="bg-slate-100 px-1 rounded">部署</code>。</li>
+                                                            <li><strong>首次部署會跳出授權流程</strong>：選擇 Google 帳號 → 看到「Google 尚未驗證這個應用程式」警告 → 點左下角 <code className="bg-slate-100 px-1 rounded">進階</code> → <code className="bg-slate-100 px-1 rounded">前往「(專案名稱)」（不安全）</code> → 按 <code className="bg-slate-100 px-1 rounded">允許</code>。</li>
+                                                            <li>部署成功後對話框顯示「<strong>網頁應用程式網址</strong>」，複製它（結尾為 <code className="bg-slate-100 px-1 rounded">/exec</code>）。</li>
+                                                        </ol>
+                                                        <p className="text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-1.5 leading-relaxed">
+                                                            💡 之後若再修改 GAS 程式，記得回 <code className="bg-white px-1 rounded">部署 → 管理部署作業 → 編輯（鉛筆）→ 新版本 → 部署</code>，否則前端拿到的還是舊版。
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Step 4 */}
+                                                    <div className="rounded-lg border-2 border-blue-300 bg-blue-50/60 p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">4</span>
+                                                            <h5 className="text-[12px] font-black text-blue-900">把 URL 貼到下方輸入框 → 儲存並連線</h5>
+                                                        </div>
+                                                        <p className="text-[11px] text-blue-900 font-bold pl-9 leading-relaxed">
+                                                            把 Step 3 複製的 <code className="bg-white px-1 rounded">/exec</code> 結尾網址貼到下方「Web App URL」欄位，先按 <strong>測試網址</strong> 確認回傳 JSON 陣列，再按 <strong>儲存並連線</strong>。儲存後可直接關閉本視窗。
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Step 5 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">5</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">啟用編輯模式</h5>
+                                                        </div>
+                                                        <p className="text-[11px] text-slate-700 font-bold pl-9 leading-relaxed">
+                                                            預設沒有密碼，所以可以直接操作。關閉本視窗後，Header 右上角應該會看到綠色 <code className="bg-slate-100 px-1 rounded">Enable edit mode</code> 按鈕 → 點下去即進入編輯模式。
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Step 6 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">6</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">建立你自己的 Series 與 Phase</h5>
+                                                        </div>
+                                                        <p className="text-[11px] text-slate-700 font-bold pl-9 leading-relaxed">
+                                                            新使用者進來時 <strong>Series（產品系列）</strong> 與 <strong>Phase（階段）</strong> 清單都是空的，
+                                                            <code className="bg-slate-100 px-1 rounded">+ New Project</code> 會 disabled 直到兩者都至少有一筆。
+                                                        </p>
+                                                        <ol className="list-decimal pl-9 space-y-1 text-[11px] text-slate-700 font-bold leading-relaxed">
+                                                            <li>進入 <code className="bg-slate-100 px-1 rounded">Series</code> 分頁新增至少一個系列（例如 <code className="bg-slate-100 px-1 rounded">ProductA</code>、<code className="bg-slate-100 px-1 rounded">Gen11</code>），可調色塊。</li>
+                                                            <li>進入 <code className="bg-slate-100 px-1 rounded">Phase</code> 分頁新增至少一個階段（例如 <code className="bg-slate-100 px-1 rounded">Design</code>、<code className="bg-slate-100 px-1 rounded">MP</code>），可選顏色。</li>
+                                                            <li>（可選）進入 <code className="bg-slate-100 px-1 rounded">Site</code> 分頁微調預設的 <code className="bg-slate-100 px-1 rounded">MX / LZ / MY / CZ / TN</code>。</li>
+                                                        </ol>
+                                                    </div>
+
+                                                    {/* Step 7 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-[11px]">7</span>
+                                                            <h5 className="text-[12px] font-black text-slate-800">新增第一個 Project</h5>
+                                                        </div>
+                                                        <p className="text-[11px] text-slate-700 font-bold pl-9 leading-relaxed">
+                                                            篩選列下方 <code className="bg-slate-100 px-1 rounded">+ New Project</code> 變綠 → 填入 Project Name、Series、PIC、Site，加入至少一段 Phase（task 描述 / type / 起訖日期），按 <code className="bg-slate-100 px-1 rounded">Save</code>。GAS 第一次收到資料就會自動建好 8 個欄位 header 並寫入。完成！
+                                                        </p>
+                                                    </div>
+
+                                                    {/* 進階小提醒 */}
+                                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                                                        <div className="text-[10px] font-black uppercase text-slate-500 tracking-wider">進階小提醒</div>
+                                                        <ul className="list-disc pl-5 space-y-1 text-[10px] text-slate-600 font-bold leading-relaxed">
+                                                            <li>想為甘特圖加密碼：在 <code className="bg-white px-1 rounded">Settings → Admin</code> 設定，清空即可移除密碼。</li>
+                                                            <li>想把這份甘特圖分享給同事：Header 的 <code className="bg-white px-1 rounded">分享連結</code> 會複製含 <code className="bg-white px-1 rounded">?gas=</code> 的網址，對方打開就自動帶入你的 GAS Web App。</li>
+                                                            <li>若更換試算表只需在同一 Apps Script 專案中改連結的表，<strong>通常不必換 URL</strong>；若新建另一個 Script 並重新部署，才需要換新的 <code className="bg-white px-0.5 rounded">/exec</code> 網址。</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </details>
+
                                             <section className="space-y-3 pt-1 border-t border-slate-200">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider">變更為新的 Web App 網址</h4>
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider">{normalizeGasUrl(gasUrl) ? "變更為新的 Web App 網址" : "Step 4 · 貼上 Web App URL"}</h4>
                                                 <label className="block text-[9px] font-black text-slate-400 uppercase">Web App URL（貼上完整網址）</label>
                                                 <textarea value={gasUrlDraft} onChange={(e) => { setGasUrlDraft(e.target.value); setSettingsUrlError(""); setSettingsTestOk(""); }} rows={4} spellCheck={false} placeholder="https://script.google.com/macros/s/…/exec" className="w-full px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] font-mono outline-none focus:border-blue-500 resize-y min-h-[5rem]" />
                                                 {settingsUrlError && <p className="text-red-600 text-[10px] font-bold">{settingsUrlError}</p>}
@@ -1817,7 +2637,6 @@
                                                 <div className="flex flex-wrap gap-2">
                                                     <button type="button" onClick={applyGasUrlFromSettings} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 transition-all uppercase text-[10px]">儲存並連線</button>
                                                     <button type="button" onClick={testDraftGasUrl} className="px-4 py-2 bg-blue-50 text-blue-800 border border-blue-200 font-black rounded-xl hover:bg-blue-100 uppercase text-[10px]">測試網址</button>
-                                                    <button type="button" onClick={resetGasUrlToDefault} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px] ml-auto">還原內建預設網址</button>
                                                 </div>
                                             </section>
                                         </>
@@ -1860,7 +2679,20 @@
                                     </div>
                                     <div className="flex justify-between items-center text-[11px] font-black uppercase text-slate-700 font-black font-sans font-black">
                                         <span className="font-black">Milestones Planning</span>
-                                        <button onClick={()=>setModalData({...modalData, phases: [...modalData.phases, {localId: Date.now(), task:"", type:"DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date())}]})} className="text-blue-600 bg-blue-50 px-3 py-1 rounded border hover:bg-blue-100 font-bold font-black font-black font-black font-black font-black">+ Add Phase</button>
+                                        <button
+                                            onClick={() => {
+                                                const firstPhaseKey = phaseList[0]?.key || "";
+                                                setModalData({
+                                                    ...modalData,
+                                                    phases: [...modalData.phases, { localId: Date.now(), task: "", type: firstPhaseKey, start: formatDate(new Date()), end: formatDate(new Date()) }]
+                                                });
+                                            }}
+                                            disabled={phaseList.length === 0}
+                                            title={phaseList.length === 0 ? "請先到 Settings → Phase 新增至少一個 Phase" : ""}
+                                            className={`px-3 py-1 rounded border font-bold ${phaseList.length === 0 ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed" : "text-blue-600 bg-blue-50 hover:bg-blue-100"}`}
+                                        >
+                                            + Add Phase
+                                        </button>
                                     </div>
                                     <div className="max-h-60 overflow-y-auto space-y-3 custom-scrollbar pr-1 font-black">
                                         {modalData.phases.map(phase => (
@@ -1895,7 +2727,28 @@
                                         ))}
                                     </div>
                                     <div className="flex gap-4 pt-4 border-t font-black font-black font-black font-black font-black font-black font-black">
-                                        {originalProjectName && <button onClick={()=>{if(window.confirm('Are you sure you want to delete this project?')){const updated=tasks.filter(t=>formatText(t.project)!==originalProjectName); setTasks(updated); handleSaveToCloud(updated); setShowModal(false);}}} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg font-black uppercase text-[10px] font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black">Delete Project</button>}
+                                        {originalProjectName && (
+                                            <button
+                                                onClick={() => askConfirm({
+                                                    title: "刪除專案",
+                                                    body: (
+                                                        <>
+                                                            確定要刪除專案 <strong className="text-slate-900">"{originalProjectName}"</strong> 及其底下所有 Phase？
+                                                            <br />
+                                                            <span className="text-[10px] text-slate-500 font-bold">此操作會立即寫回 Google 試算表並同步給其他人，無法復原。</span>
+                                                        </>
+                                                    ),
+                                                    confirmLabel: "確定刪除專案",
+                                                    onConfirm: () => {
+                                                        const updated = tasks.filter(t => formatText(t.project) !== originalProjectName);
+                                                        setTasks(updated);
+                                                        handleSaveToCloud(updated);
+                                                        setShowModal(false);
+                                                    }
+                                                })}
+                                                className="px-4 py-2 bg-red-50 text-red-600 rounded-lg font-black uppercase text-[10px] hover:bg-red-100"
+                                            >Delete Project</button>
+                                        )}
                                         <button onClick={()=>setShowModal(false)} className="px-5 py-2 text-slate-500 font-black ml-auto uppercase text-[10px] font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black font-black">Cancel</button>
                                         <button onClick={()=>{
                                             let newTasks = [...tasks];
