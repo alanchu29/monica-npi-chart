@@ -60,7 +60,13 @@ python -m http.server 5500
 ## 重要設定
 
 - **GAS Web App 網址**：存於 `localStorage` 鍵 `monica-npi-gas-webapp-url`。若尚未儲存過網址（且未使用網址列 `?gas=` 參數），首次進入頁面會**自動開啟 Settings 並停留在 GAS URL 分頁**，須貼上 `/exec` 網址並按「儲存並連線」，或按「還原內建預設網址」使用程式內建的 `DEFAULT_GAS_URL`。在 **Settings → GAS URL** 可一鍵複製「含 `?gas=` 的分享連結」，方便把同一支 Web App 交給他人開啟（對方瀏覽器會自動帶入該網址）。
-- **編輯模式密碼**：在 **Settings → Admin** 設定（存於 `localStorage`）；程式內建預設為 `DEFAULT_EDIT_PASSWORD`。
+- **編輯模式密碼**：**已改為雲端共用**，存於 GAS `DocumentProperties.editPassword`，所有使用同一支 Web App 的人共用一份；**不再存於 localStorage**。
+  - **預設無密碼**：新部署的 GAS 上沒有設定 `editPassword` 屬性 → 任何人點 **Settings → Admin → Enable edit mode** 即可直接解鎖（不需輸入）。
+  - 設定 / 變更：**Settings → Admin** 在「設定 / 變更雲端密碼」輸入新值並按「儲存到雲端」（前端 POST `{ action: "setEditPassword", password }`）。
+  - 清除：清空輸入框後按「儲存到雲端」即可移除密碼，回到預設「人人可解鎖」狀態。
+  - **本機備份遷移**：若本機 `localStorage` 內有舊版 `editPassword`，首次連到新版 GAS 時會嘗試自動上傳；上傳成功（下次重整見雲端有密碼）後本機備份才會清除。
+  - **GAS 端需**：`doGet(?meta=1)` 回傳 `editPassword`、`doPost(e)` 支援 `setEditPassword` 分支；範例見 `.git/App.gs.js`。修改後請**重新部署 Web App**。
+  - **安全提醒**：此密碼以明文存於 DocumentProperties，僅是前端「軟性閘門」，**不是真正的存取控制**（任何人拿到 GAS URL 都能 GET 拿到資料與密碼）。需要真正權限請靠 Web App 部署設定（限定特定 Google 帳號）。
 - **「今日」紅線**：一律依 **台北時區（Asia/Taipei）當日**，無需手動設定日期。
 - **可視日期範圍**：在 **Settings → Display** 設定「今日之前／之後」各顯示幾天（存於 `localStorage`）；內建預設為前 7 天、後 90 天（見 `DEFAULT_VISIBLE_DAYS_BEFORE` / `DEFAULT_VISIBLE_DAYS_AFTER`）。
 - **甘特圖標題**：標題就是 **Google 試算表的檔案名稱**（單一來源，不存本機）。
@@ -68,12 +74,16 @@ python -m http.server 5500
   - 在 **Settings → Display** 修改並按「儲存標題」：前端 POST `{ action: "setTitle", title }`，GAS 端呼叫 `ss.rename(...)` 重新命名整本試算表；其他使用者重新整理後即會同步。
   - GAS 端需在 `doGet(e)` 加 `?meta=1` 分支、在 `doPost(e)` 加 `setTitle` 分支；範例見 `.git/App.gs.js`。修改後請**重新部署 Web App**；第一次重新命名可能需在 Apps Script 編輯器手動執行一次以完成 Drive 授權。
   - 取不到試算表名稱時（例如 GAS 尚未部署支援 `?meta=1` 的版本）使用後備預設 `DEFAULT_CHART_TITLE`。
-- **Series / Phase / Site 候選清單**：在 **Settings** 中各自獨立的分頁管理（皆存於 `localStorage` 的 `monica-npi-admin-prefs`）。
-  - **Series**：在 **Settings → Series** 新增 / 刪除，並可逐項點色塊調整 Series 標籤顯示顏色（會即時反映在主畫面的專案列）。內建預設見 `INITIAL_SERIES_LIST` 與 `INITIAL_SERIES_COLORS`，新增 Series 時會依 `SERIES_COLOR_PALETTE` 自動分配顏色。
-  - **Phase**：在 **Settings → Phase** 新增 / 刪除 / 重新命名，並可逐項調整顯示顏色（即 Gantt 色塊與 Legend 的顏色）。內建預設見 `INITIAL_PHASE_LIST`。Phase 的內部 `key`（即試算表 `type` 欄位儲存的值）會依名稱自動產生，避免與既有資料衝突。
-  - **Site**：在 **Settings → Site** 新增 / 刪除，內建預設見 `INITIAL_SITE_LIST`。
+- **Series / Phase / Site 候選清單與顏色**：**已改為雲端共用**，存於 GAS 端 `PropertiesService.getDocumentProperties()`，鍵名 `labels`；**不再存於 localStorage**。所有開啟同一支 GAS 的使用者重新整理後都會看到一致的清單與顏色。
+  - **Series**：**Settings → Series** 新增 / 刪除，並可逐項點色塊調整 Series 標籤顯示顏色（會即時反映在主畫面的專案列）。內建預設見 `INITIAL_SERIES_LIST` 與 `INITIAL_SERIES_COLORS`，新增 Series 時會依 `SERIES_COLOR_PALETTE` 自動分配顏色。
+  - **Phase**：**Settings → Phase** 新增 / 刪除 / 重新命名，並可逐項調整顯示顏色（Gantt 色塊與 Legend 的顏色）。內建預設見 `INITIAL_PHASE_LIST`。Phase 的內部 `key`（試算表 `type` 欄位儲存的值）會依名稱自動產生，避免與既有資料衝突。
+  - **Site**：**Settings → Site** 新增 / 刪除，內建預設見 `INITIAL_SITE_LIST`。
+  - 進站讀取：透過 GAS `?meta=1` 同時取得 `labels` 物件（`{ seriesList, siteList, seriesColors, phaseList }`）。任何在 UI 上的新增/刪除/改顏色，前端會立即 POST `{ action: "setLabels", labels }`，GAS 端寫入 `PropertiesService` 並廣播給其他使用者（對方重新整理可見）。
+  - **GAS 端需在 `doGet(e)` 擴充 `?meta=1` 回傳 `labels`、在 `doPost(e)` 加 `setLabels` 分支**；完整範例見 `.git/App.gs.js`。修改後請**重新部署 Web App**（並可能需在 Apps Script 編輯器手動執行一次完成授權）。
+  - **本機備份遷移**：若在啟用雲端化之前曾於本機累積過 Series/Phase/Site 設定，首次連到新版 GAS 時會嘗試自動把本機設定**一次性**上傳到雲端；上傳成功後（下次重整見雲端有資料）本機備份才會被清除。
   - 篩選選項會與試算表資料中已出現的 `category` / `site` 合併；**PIC** 候選仍由 `DEFAULT_PICS` 與資料中的 `pic` 合併。
   - **Resource Check** 仰賴 `DevelopmentTNRS` 與 `DevelopmentPI` 兩個 key；若於 Settings 刪除這兩個 Phase，超載偵測將不會觸發（其他 Phase 不影響）。
+  - 取不到 `labels`（例如 GAS 尚未部署支援 `?meta=1` 新版本）→ 顯示「正在從 Google 試算表載入…」並暫時使用 `INITIAL_*` 內建預設，**不會破壞畫面**。
 
 ## 安全與維護建議
 
