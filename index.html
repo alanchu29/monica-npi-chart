@@ -542,9 +542,13 @@
             const [shareLinkCopyMsg, setShareLinkCopyMsg] = useState("");
             const [headerShareLinkToast, setHeaderShareLinkToast] = useState("");
             const [editPassDraft, setEditPassDraft] = useState("");
-            const [unlockPassInput, setUnlockPassInput] = useState("");
-            const [unlockError, setUnlockError] = useState(false);
             const [adminPassMsg, setAdminPassMsg] = useState("");
+            // Lock gate: 進入 Settings 與 Enable edit mode 共用的密碼驗證 modal。
+            // intent 紀錄通過後要執行的動作（"settings" = 開設定、"edit" = 只解鎖編輯模式）。
+            const [showLockGate, setShowLockGate] = useState(false);
+            const [lockGateIntent, setLockGateIntent] = useState(null);
+            const [lockGateInput, setLockGateInput] = useState("");
+            const [lockGateError, setLockGateError] = useState(false);
             const [visibleDaysBeforeDraft, setVisibleDaysBeforeDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysBefore));
             const [visibleDaysAfterDraft, setVisibleDaysAfterDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysAfter));
             const [chartTitleDraft, setChartTitleDraft] = useState("");
@@ -950,8 +954,6 @@
                 setSettingsUrlError("");
                 setSettingsTestOk("");
                 setEditPassDraft(editPassword);
-                setUnlockPassInput("");
-                setUnlockError(false);
                 setAdminPassMsg("");
                 setDisplaySaveMsg("");
                 setDisplaySaveErr("");
@@ -1069,7 +1071,6 @@
                     return;
                 }
                 setEditPassword(np);
-                setUnlockError(false);
                 const ok = await saveEditPasswordToSheet(np);
                 if (ok) {
                     setAdminPassMsg(np
@@ -1086,22 +1087,51 @@
                 }
             };
 
-            const tryUnlockEditMode = () => {
-                // 無密碼模式：人人可直接解鎖編輯模式
+            // 進入 Settings / 啟用 Edit Mode 共用入口；雲端有密碼且尚未解鎖時跳出 Lock Gate。
+            const requestUnlock = useCallback((intent) => {
+                // 雲端密碼還沒從 GAS 載回來（且 GAS URL 已設）→ 還沒法判斷，先什麼都不做。
+                // 對應按鈕已用 disabled 視覺呈現「載入中」，這裡只是安全網。
+                if (!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) return;
+
+                // 雲端未設密碼：完全跳過密碼步驟，依 intent 直接執行對應動作，
+                // 「開 Settings」不會順手把 isEditMode 打開（避免無意間進入編輯模式）。
                 if (!editPassword) {
-                    setIsEditMode(true);
-                    setUnlockError(false);
-                    setUnlockPassInput("");
+                    if (intent === "edit") setIsEditMode(true);
+                    else if (intent === "settings") openSettingsModal();
                     return;
                 }
-                if (unlockPassInput === editPassword) {
-                    setIsEditMode(true);
-                    setUnlockError(false);
-                    setUnlockPassInput("");
-                } else {
-                    setUnlockError(true);
+                // 已在編輯模式（= 此 session 內已通過驗證）：直接執行動作，不再要密碼
+                if (isEditMode) {
+                    if (intent === "settings") openSettingsModal();
+                    return;
                 }
-            };
+                // 雲端有密碼且尚未解鎖 → 跳出密碼 gate
+                setLockGateIntent(intent);
+                setLockGateInput("");
+                setLockGateError(false);
+                setShowLockGate(true);
+            }, [isEditMode, editPassword, editPasswordLoaded, gasUrl]);
+
+            const closeLockGate = useCallback(() => {
+                setShowLockGate(false);
+                setLockGateIntent(null);
+                setLockGateInput("");
+                setLockGateError(false);
+            }, []);
+
+            const submitLockGate = useCallback(() => {
+                if (lockGateInput === editPassword) {
+                    setIsEditMode(true);
+                    const intent = lockGateIntent;
+                    setShowLockGate(false);
+                    setLockGateIntent(null);
+                    setLockGateInput("");
+                    setLockGateError(false);
+                    if (intent === "settings") openSettingsModal();
+                } else {
+                    setLockGateError(true);
+                }
+            }, [lockGateInput, editPassword, lockGateIntent]);
 
             const saveVisibleDateRange = () => {
                 setDisplaySaveErr("");
@@ -1288,19 +1318,32 @@
                             ) : null}
                             <button
                                 type="button"
-                                onClick={() => openSettingsModal()}
-                                className="px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight bg-slate-700 border-slate-600 hover:bg-slate-600 flex items-center gap-1"
-                                title="Settings: Display, Series & Site, Admin, GAS URL"
+                                onClick={() => requestUnlock("settings")}
+                                disabled={!editPasswordLoaded && !!normalizeGasUrl(gasUrl)}
+                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-800 border-slate-700 text-slate-400 cursor-wait" : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
+                                title={editPassword && !isEditMode ? "Settings 需要密碼解鎖" : "Settings: Display, Series & Site, Admin, GAS URL"}
                             >
                                 <Icon name="settings" size={14} className="inline" /> Settings
+                                {editPassword && !isEditMode && <Icon name="lock" size={12} className="inline ml-1 opacity-80" />}
                             </button>
-                            {isEditMode && (
+                            {isEditMode ? (
                                 <button
                                     type="button"
                                     onClick={() => setIsEditMode(false)}
-                                    className="px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20"
+                                    className="px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20 uppercase tracking-tight flex items-center gap-1"
+                                    title="退出編輯模式"
                                 >
-                                    <Icon name="x" size={12} className="inline mr-1" /> Finish editing
+                                    <Icon name="x" size={12} className="inline" /> Finish editing
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => requestUnlock("edit")}
+                                    disabled={!editPasswordLoaded && !!normalizeGasUrl(gasUrl)}
+                                    className={`px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-700 border-slate-600 text-slate-400 cursor-wait" : "bg-emerald-600 border-emerald-400 text-white hover:bg-emerald-500"}`}
+                                    title={editPassword ? "啟用編輯模式（需密碼）" : "啟用編輯模式"}
+                                >
+                                    <Icon name={editPassword ? "lock" : "edit-2"} size={12} className="inline" /> Enable edit mode
                                 </button>
                             )}
                         </div>
@@ -1459,6 +1502,54 @@
                     </div>
 
                     {/* Settings: Admin + Options */}
+                    {showLockGate && (
+                        <div
+                            className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 font-sans"
+                            onClick={(e) => { if (e.target === e.currentTarget) closeLockGate(); }}
+                        >
+                            <div className="bg-white rounded-2xl shadow-2xl border-2 border-slate-200 w-[420px] max-w-full overflow-hidden">
+                                <div className="px-5 py-3 bg-slate-900 text-white flex items-center justify-between">
+                                    <div className="flex items-center gap-2 font-black uppercase text-[12px] tracking-wider">
+                                        <Icon name="lock" size={16} />
+                                        {lockGateIntent === "settings" ? "Settings 需要解鎖" : "Enable edit mode"}
+                                    </div>
+                                    <button type="button" onClick={closeLockGate} className="text-slate-300 hover:text-white p-1" aria-label="Close">
+                                        <Icon name="x" size={18} />
+                                    </button>
+                                </div>
+                                <div className="p-5 space-y-3">
+                                    <p className="text-slate-600 text-[11px] font-bold leading-relaxed">
+                                        {lockGateIntent === "settings"
+                                            ? "本站已啟用編輯密碼，進入 Settings 需要先輸入密碼解鎖。解鎖後在當前視窗有效，關閉編輯模式即重新上鎖。"
+                                            : "本站已啟用編輯密碼，請輸入雲端密碼以啟用編輯模式。"}
+                                    </p>
+                                    <div className="space-y-1">
+                                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">雲端密碼</label>
+                                        <input
+                                            type="password"
+                                            autoFocus
+                                            value={lockGateInput}
+                                            onChange={(e) => { setLockGateInput(e.target.value); setLockGateError(false); }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") submitLockGate();
+                                                else if (e.key === "Escape") closeLockGate();
+                                            }}
+                                            className={`w-full px-3 py-2 bg-slate-50 border-2 rounded-xl text-[12px] outline-none focus:border-blue-500 ${lockGateError ? "border-red-400 animate-shake" : "border-slate-200"}`}
+                                            placeholder="輸入密碼後按 Enter"
+                                            autoComplete="off"
+                                        />
+                                        {lockGateError && <p className="text-red-600 text-[10px] font-bold">密碼錯誤，請再試一次。</p>}
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-1">
+                                        <button type="button" onClick={closeLockGate} className="px-3 py-1.5 bg-slate-100 text-slate-600 font-black rounded-lg uppercase text-[10px] hover:bg-slate-200">取消</button>
+                                        <button type="button" onClick={submitLockGate} className="px-4 py-1.5 bg-emerald-600 text-white font-black rounded-lg uppercase text-[10px] hover:bg-emerald-500 flex items-center gap-1">
+                                            <Icon name="key" size={12} /> 解鎖
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {showSettingsModal && (
                         <div className="settings-pane fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
@@ -1659,28 +1750,19 @@
                                                             : "讀取中…"}
                                                     </div>
                                                 </div>
-                                                <div className="grid gap-3 sm:grid-cols-2">
-                                                    <div className="space-y-1">
-                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">設定 / 變更雲端密碼（留空 = 清除密碼）</label>
-                                                        <input type="password" value={editPassDraft} onChange={(e) => { setEditPassDraft(e.target.value); setAdminPassMsg(""); }} className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500" autoComplete="new-password" placeholder="輸入新密碼，或留空清除" />
+                                                {/* 解鎖編輯模式的入口已搬到主 UI header，這裡只保留密碼設定。
+                                                    能進到 Admin 分頁代表已通過密碼 gate（或本就無密碼），可直接改密碼。 */}
+                                                <div className="space-y-1 max-w-md">
+                                                    <label className="block text-[9px] font-black text-slate-400 uppercase">設定 / 變更雲端密碼（留空 = 清除密碼）</label>
+                                                    <input type="password" value={editPassDraft} onChange={(e) => { setEditPassDraft(e.target.value); setAdminPassMsg(""); }} className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500" autoComplete="new-password" placeholder="輸入新密碼，或留空清除" />
+                                                    <div className="flex flex-wrap gap-2 items-center pt-1">
                                                         <button type="button" onClick={saveEditPasscode} disabled={!normalizeGasUrl(gasUrl) || !editPasswordLoaded} className={`px-3 py-1.5 font-black rounded-lg uppercase text-[10px] ${(normalizeGasUrl(gasUrl) && editPasswordLoaded) ? 'bg-slate-900 text-white hover:bg-blue-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>儲存到雲端</button>
-                                                        {adminPassMsg && <p className={`text-[10px] font-bold ${adminPassMsg.includes("失敗") || adminPassMsg.includes("超過") || adminPassMsg.includes("請先") ? "text-red-600" : "text-emerald-700"}`}>{adminPassMsg}</p>}
+                                                        {isEditMode && <button type="button" onClick={() => setIsEditMode(false)} className="px-3 py-1.5 bg-orange-100 text-orange-800 border border-orange-300 font-black rounded-lg uppercase text-[10px]">Exit edit mode</button>}
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">Unlock editing</label>
-                                                        {editPassword ? (
-                                                            <>
-                                                                <input type="password" value={unlockPassInput} onChange={(e) => { setUnlockPassInput(e.target.value); setUnlockError(false); }} onKeyDown={(e) => e.key === "Enter" && tryUnlockEditMode()} className={`w-full px-3 py-2 bg-slate-50 border-2 rounded-xl text-[11px] outline-none focus:border-blue-500 ${unlockError ? "border-red-400 animate-shake" : "border-slate-100"}`} placeholder="輸入雲端密碼" autoComplete="off" />
-                                                                {unlockError && <p className="text-red-600 text-[10px] font-bold">密碼錯誤。</p>}
-                                                            </>
-                                                        ) : (
-                                                            <p className="text-emerald-700 text-[10px] font-bold bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5">目前雲端未設定密碼，可直接解鎖。</p>
-                                                        )}
-                                                        <div className="flex flex-wrap gap-2">
-                                                            <button type="button" onClick={tryUnlockEditMode} className="px-3 py-1.5 bg-green-600 text-white font-black rounded-lg uppercase text-[10px] hover:bg-green-700">Enable edit mode</button>
-                                                            {isEditMode && <button type="button" onClick={() => setIsEditMode(false)} className="px-3 py-1.5 bg-orange-100 text-orange-800 border border-orange-300 font-black rounded-lg uppercase text-[10px]">Exit edit mode</button>}
-                                                        </div>
-                                                    </div>
+                                                    {adminPassMsg && <p className={`text-[10px] font-bold ${adminPassMsg.includes("失敗") || adminPassMsg.includes("超過") || adminPassMsg.includes("請先") ? "text-red-600" : "text-emerald-700"}`}>{adminPassMsg}</p>}
+                                                    <p className="text-[10px] text-slate-500 font-bold leading-relaxed pt-1">
+                                                        提示：解鎖編輯模式的入口已移至上方 header。要切換到無密碼狀態，留空後按「儲存到雲端」即可。
+                                                    </p>
                                                 </div>
                                             </section>
                                         </>
