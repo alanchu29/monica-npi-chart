@@ -71,7 +71,7 @@
                 const stored = localStorage.getItem(GAS_URL_STORAGE_KEY);
                 if (stored && stored.trim()) return stored.trim();
             } catch (e) { /* ignore */ }
-            return DEFAULT_GAS_URL;
+            return "";
         };
 
         const normalizeGasUrl = (raw) => {
@@ -83,6 +83,19 @@
 
         const isLikelyGasWebAppUrl = (url) =>
             /script\.google\.com\/macros\/s\//i.test(url) && /\/exec$/i.test(url);
+
+        /** 目前頁面網址 + ?gas=… 供分享；開啟時 readInitialGasUrl 會讀取並寫入 localStorage。 */
+        const buildShareableChartUrl = (gasWebAppUrl) => {
+            const norm = normalizeGasUrl(gasWebAppUrl);
+            if (!norm) return "";
+            try {
+                const u = new URL(window.location.href);
+                u.searchParams.set("gas", norm);
+                return u.toString();
+            } catch (e) {
+                return "";
+            }
+        };
 
         const DEFAULT_EDIT_PASSWORD = "6669";
         const ADMIN_PREFS_STORAGE_KEY = "monica-npi-admin-prefs";
@@ -104,28 +117,69 @@
             return new Date(year, month - 1, day, 12, 0, 0);
         };
 
-        const dateAtNoonFromYMD = (ymd) => {
-            const p = String(ymd || "").split('T')[0].split('-');
-            if (p.length < 3) return getTaiwanTodayNoon();
-            const y = parseInt(p[0], 10), m = parseInt(p[1], 10), d = parseInt(p[2], 10);
-            if (!y || !m || !d) return getTaiwanTodayNoon();
-            return new Date(y, m - 1, d, 12, 0, 0);
+        const DEFAULT_VISIBLE_DAYS_BEFORE = 7;
+        const DEFAULT_VISIBLE_DAYS_AFTER = 90;
+
+        const INITIAL_SERIES_LIST = ['Gen10', 'Gen11', 'Gen12 AMD', 'Gen12 Intel'];
+        const INITIAL_SITE_LIST = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
+        const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
+
+        const CATEGORY_TAG_STYLE = {
+            'Gen10': 'bg-slate-300 text-slate-800 border-slate-400',
+            'Gen11': 'bg-blue-200 text-blue-800 border-blue-300',
+            'Gen12 AMD': 'bg-red-200 text-red-800 border-red-300',
+            'Gen12 Intel': 'bg-cyan-200 text-cyan-800 border-cyan-300'
+        };
+
+        const seriesTagClass = (name) => CATEGORY_TAG_STYLE[name] || 'bg-slate-200 text-slate-800 border-slate-300';
+
+        const normalizeLabelList = (arr) => {
+            const seen = new Set();
+            const out = [];
+            (Array.isArray(arr) ? arr : []).forEach((raw) => {
+                const s = String(raw || "").trim();
+                if (!s || s.length > 120 || seen.has(s)) return;
+                seen.add(s);
+                out.push(s);
+            });
+            return out;
         };
 
         const readInitialAdminPrefs = () => {
             const fallback = {
                 editPassword: DEFAULT_EDIT_PASSWORD,
-                timelineYmd: null,
-                resourceCheckEnabled: false
+                visibleDaysBefore: DEFAULT_VISIBLE_DAYS_BEFORE,
+                visibleDaysAfter: DEFAULT_VISIBLE_DAYS_AFTER,
+                resourceCheckEnabled: false,
+                seriesList: [...INITIAL_SERIES_LIST],
+                siteList: [...INITIAL_SITE_LIST]
             };
             try {
                 const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
                 if (!raw) return fallback;
                 const p = JSON.parse(raw);
+                const clampInt = (v, def, min, max) => {
+                    const n = parseInt(v, 10);
+                    if (!Number.isFinite(n)) return def;
+                    return Math.min(max, Math.max(min, n));
+                };
+                let seriesList = normalizeLabelList(p.seriesList);
+                let siteList = normalizeLabelList(p.siteList);
+                if (!seriesList.length && Array.isArray(p.defaultCategories) && p.defaultCategories.length) {
+                    seriesList = normalizeLabelList(p.defaultCategories);
+                }
+                if (!siteList.length && Array.isArray(p.defaultSites) && p.defaultSites.length) {
+                    siteList = normalizeLabelList(p.defaultSites);
+                }
+                if (!seriesList.length) seriesList = [...fallback.seriesList];
+                if (!siteList.length) siteList = [...fallback.siteList];
                 return {
                     editPassword: typeof p.editPassword === "string" && p.editPassword.trim() ? p.editPassword.trim() : fallback.editPassword,
-                    timelineYmd: typeof p.timelineYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.timelineYmd) ? p.timelineYmd : null,
-                    resourceCheckEnabled: p.resourceCheckEnabled === true
+                    visibleDaysBefore: clampInt(p.visibleDaysBefore, fallback.visibleDaysBefore, 0, 730),
+                    visibleDaysAfter: clampInt(p.visibleDaysAfter, fallback.visibleDaysAfter, 0, 730),
+                    resourceCheckEnabled: p.resourceCheckEnabled === true,
+                    seriesList,
+                    siteList
                 };
             } catch (e) {
                 return fallback;
@@ -151,17 +205,6 @@
             "VB": "VB", "V/B": "VB"
         };
 
-        const DEFAULT_CATEGORIES = ['Gen10', 'Gen11', 'Gen12 AMD', 'Gen12 Intel'];
-        const DEFAULT_SITES = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
-        const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
-
-        const CATEGORY_TAG_STYLE = {
-            'Gen10': 'bg-slate-300 text-slate-800 border-slate-400',
-            'Gen11': 'bg-blue-200 text-blue-800 border-blue-300',
-            'Gen12 AMD': 'bg-red-200 text-red-800 border-red-300',
-            'Gen12 Intel': 'bg-cyan-200 text-cyan-800 border-cyan-300'
-        };
-
         // --- SVG icon component ---
         const Icon = ({ name, size = 16, className = "" }) => {
             const icons = {
@@ -178,6 +221,7 @@
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
                 spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>,
+                link: <g><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></g>,
                 settings: <g><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></g>
             };
             return (
@@ -257,37 +301,49 @@
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [errorMsg, setErrorMsg] = useState(null);
             
-            const [selectedCategories, setSelectedCategories] = useState([]);
+            const [selectedSeries, setSelectedSeries] = useState([]);
             const [selectedSites, setSelectedSites] = useState([]);
             const [selectedPics, setSelectedPics] = useState([]);
-            const [collapsedCategories, setCollapsedCategories] = useState({});
+            const [collapsedSeries, setCollapsedSeries] = useState({});
             const [showModal, setShowModal] = useState(false);
-            const [modalData, setModalData] = useState({ project: "", category: "Gen10", pic: "", site: "MX", phases: [] });
+            const [modalData, setModalData] = useState(() => {
+                const p = readInitialAdminPrefs();
+                return { project: "", category: p.seriesList[0] || "", pic: DEFAULT_PICS[0] || "", site: p.siteList[0] || "", phases: [] };
+            });
             const [originalProjectName, setOriginalProjectName] = useState(null);
 
             const [editPassword, setEditPassword] = useState(() => readInitialAdminPrefs().editPassword);
-            const [timelineAnchor, setTimelineAnchor] = useState(() => {
-                const p = readInitialAdminPrefs();
-                return p.timelineYmd ? dateAtNoonFromYMD(p.timelineYmd) : getTaiwanTodayNoon();
-            });
+            const [visibleDaysBefore, setVisibleDaysBefore] = useState(() => readInitialAdminPrefs().visibleDaysBefore);
+            const [visibleDaysAfter, setVisibleDaysAfter] = useState(() => readInitialAdminPrefs().visibleDaysAfter);
 
-            const [gasUrl, setGasUrl] = useState(readInitialGasUrl);
-            const [showSettingsModal, setShowSettingsModal] = useState(false);
-            const [settingsTab, setSettingsTab] = useState("admin");
-            const [gasUrlDraft, setGasUrlDraft] = useState("");
+            const [seriesList, setSeriesList] = useState(() => readInitialAdminPrefs().seriesList);
+            const [siteList, setSiteList] = useState(() => readInitialAdminPrefs().siteList);
+            const [newSeriesInput, setNewSeriesInput] = useState("");
+            const [newSiteInput, setNewSiteInput] = useState("");
+            const [labelsTabErr, setLabelsTabErr] = useState("");
+            const [labelsTabMsg, setLabelsTabMsg] = useState("");
+
+            const initialGasUrl = useMemo(() => readInitialGasUrl(), []);
+            const [gasUrl, setGasUrl] = useState(initialGasUrl);
+            const [showSettingsModal, setShowSettingsModal] = useState(() => !normalizeGasUrl(initialGasUrl));
+            const [settingsTab, setSettingsTab] = useState(() => (!normalizeGasUrl(initialGasUrl) ? "gas" : "display"));
+            const [gasUrlDraft, setGasUrlDraft] = useState(() => initialGasUrl || "");
             const [settingsUrlError, setSettingsUrlError] = useState("");
             const [settingsTestOk, setSettingsTestOk] = useState("");
-            const [editPassDraft, setEditPassDraft] = useState("");
+            const [shareLinkCopyMsg, setShareLinkCopyMsg] = useState("");
+            const [headerShareLinkToast, setHeaderShareLinkToast] = useState("");
+            const [editPassDraft, setEditPassDraft] = useState(() => readInitialAdminPrefs().editPassword);
             const [unlockPassInput, setUnlockPassInput] = useState("");
             const [unlockError, setUnlockError] = useState(false);
             const [adminPassMsg, setAdminPassMsg] = useState("");
-            const [timelineDateDraft, setTimelineDateDraft] = useState("");
+            const [visibleDaysBeforeDraft, setVisibleDaysBeforeDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysBefore));
+            const [visibleDaysAfterDraft, setVisibleDaysAfterDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysAfter));
             const [displaySaveMsg, setDisplaySaveMsg] = useState("");
             const [displaySaveErr, setDisplaySaveErr] = useState("");
 
             const dynamicOptions = useMemo(() => {
-                const cats = new Set(DEFAULT_CATEGORIES);
-                const sites = new Set(DEFAULT_SITES);
+                const cats = new Set(seriesList);
+                const sites = new Set(siteList);
                 const pics = new Set(DEFAULT_PICS);
                 tasks.forEach(t => {
                     const c = formatText(t.category).trim(), s = formatText(t.site).trim(), p = formatText(t.pic).trim();
@@ -296,16 +352,100 @@
                     if (p) p.split(/[/,，&]/).forEach(n => n.trim() && pics.add(n.trim()));
                 });
                 return { categories: Array.from(cats).sort(), sites: Array.from(sites).sort(), pics: Array.from(pics).sort() };
-            }, [tasks]);
+            }, [tasks, seriesList, siteList]);
 
             const persistAdminSnapshot = useCallback((overrides = {}) => {
                 const snap = {
                     editPassword: overrides.editPassword !== undefined ? overrides.editPassword : editPassword,
-                    timelineYmd: overrides.timelineYmd !== undefined ? overrides.timelineYmd : formatDate(timelineAnchor),
-                    resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled
+                    visibleDaysBefore: overrides.visibleDaysBefore !== undefined ? overrides.visibleDaysBefore : visibleDaysBefore,
+                    visibleDaysAfter: overrides.visibleDaysAfter !== undefined ? overrides.visibleDaysAfter : visibleDaysAfter,
+                    resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled,
+                    seriesList: overrides.seriesList !== undefined ? overrides.seriesList : seriesList,
+                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [editPassword, timelineAnchor, isResourceCheckEnabled]);
+            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList]);
+
+            const addSeriesItem = useCallback(() => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                const s = newSeriesInput.trim();
+                if (!s) {
+                    setLabelsTabErr("請輸入 Series 名稱。");
+                    return;
+                }
+                if (s.length > 120) {
+                    setLabelsTabErr("名稱不可超過 120 字元。");
+                    return;
+                }
+                if (seriesList.includes(s)) {
+                    setLabelsTabErr("此 Series 已存在。");
+                    return;
+                }
+                const next = [...seriesList, s];
+                setSeriesList(next);
+                setNewSeriesInput("");
+                persistAdminSnapshot({ seriesList: next });
+                setLabelsTabMsg("已新增 Series。");
+            }, [newSeriesInput, seriesList, persistAdminSnapshot]);
+
+            const removeSeriesItem = useCallback((name) => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                if (seriesList.length <= 1) {
+                    setLabelsTabErr("至少須保留一個 Series。");
+                    return;
+                }
+                const next = seriesList.filter((x) => x !== name);
+                setSeriesList(next);
+                persistAdminSnapshot({ seriesList: next });
+                setSelectedSeries((sel) => sel.filter((x) => x !== name));
+                setCollapsedSeries((prev) => {
+                    const cp = { ...prev };
+                    delete cp[name];
+                    return cp;
+                });
+                setModalData((md) => (md.category === name ? { ...md, category: next[0] || "" } : md));
+                setLabelsTabMsg("已刪除 Series。");
+            }, [seriesList, persistAdminSnapshot]);
+
+            const addSiteItem = useCallback(() => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                const s = newSiteInput.trim();
+                if (!s) {
+                    setLabelsTabErr("請輸入 Site 代碼或名稱。");
+                    return;
+                }
+                if (s.length > 120) {
+                    setLabelsTabErr("名稱不可超過 120 字元。");
+                    return;
+                }
+                if (siteList.includes(s)) {
+                    setLabelsTabErr("此 Site 已存在。");
+                    return;
+                }
+                const next = [...siteList, s];
+                setSiteList(next);
+                setNewSiteInput("");
+                persistAdminSnapshot({ siteList: next });
+                setLabelsTabMsg("已新增 Site。");
+            }, [newSiteInput, siteList, persistAdminSnapshot]);
+
+            const removeSiteItem = useCallback((name) => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                if (siteList.length <= 1) {
+                    setLabelsTabErr("至少須保留一個 Site。");
+                    return;
+                }
+                const next = siteList.filter((x) => x !== name);
+                setSiteList(next);
+                persistAdminSnapshot({ siteList: next });
+                setSelectedSites((sel) => sel.filter((x) => x !== name));
+                setModalData((md) => (md.site === name ? { ...md, site: next[0] || "" } : md));
+                setLabelsTabMsg("已刪除 Site。");
+            }, [siteList, persistAdminSnapshot]);
 
             const fetchFromSheets = useCallback(async () => {
                 const base = normalizeGasUrl(gasUrl);
@@ -352,9 +492,11 @@
             useEffect(() => { fetchFromSheets(); }, [fetchFromSheets]);
 
             const openSettingsModal = (tab) => {
-                let t = "admin";
-                if (tab === "display") t = "display";
+                let t = "display";
+                if (tab === "labels") t = "labels";
+                else if (tab === "admin") t = "admin";
                 else if (tab === "gas") t = "gas";
+                else if (tab === "display") t = "display";
                 setSettingsTab(t);
                 setGasUrlDraft(gasUrl || "");
                 setSettingsUrlError("");
@@ -365,9 +507,50 @@
                 setAdminPassMsg("");
                 setDisplaySaveMsg("");
                 setDisplaySaveErr("");
-                setTimelineDateDraft(formatDate(timelineAnchor));
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                setShareLinkCopyMsg("");
+                setHeaderShareLinkToast("");
+                setVisibleDaysBeforeDraft(String(visibleDaysBefore));
+                setVisibleDaysAfterDraft(String(visibleDaysAfter));
                 setShowSettingsModal(true);
             };
+
+            useEffect(() => {
+                if (!normalizeGasUrl(gasUrl)) {
+                    setShowSettingsModal(true);
+                    setSettingsTab("gas");
+                }
+            }, [gasUrl]);
+
+            const shareableChartUrl = useMemo(() => buildShareableChartUrl(gasUrl), [gasUrl]);
+
+            const copyShareableChartUrl = useCallback(async (target = "settings") => {
+                const url = buildShareableChartUrl(gasUrl);
+                if (!url) {
+                    if (target === "header") {
+                        setHeaderShareLinkToast("請先完成 GAS URL 設定");
+                        setTimeout(() => setHeaderShareLinkToast(""), 3000);
+                    }
+                    return;
+                }
+                try {
+                    await navigator.clipboard.writeText(url);
+                    if (target === "header") {
+                        setHeaderShareLinkToast("已複製分享連結");
+                        setTimeout(() => setHeaderShareLinkToast(""), 2500);
+                    } else {
+                        setShareLinkCopyMsg("已複製到剪貼簿");
+                        setTimeout(() => setShareLinkCopyMsg(""), 2500);
+                    }
+                } catch (e) {
+                    setShareLinkCopyMsg("");
+                    setHeaderShareLinkToast("");
+                    try {
+                        window.prompt("請手動複製以下連結：", url);
+                    } catch (_) { /* ignore */ }
+                }
+            }, [gasUrl]);
 
             const testDraftGasUrl = async () => {
                 const normalized = normalizeGasUrl(gasUrlDraft);
@@ -440,44 +623,50 @@
                 }
             };
 
-            const saveTimelineDisplay = () => {
+            const saveVisibleDateRange = () => {
                 setDisplaySaveErr("");
                 setDisplaySaveMsg("");
-                const ymd = String(timelineDateDraft || "").trim();
-                if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
-                    setDisplaySaveErr("Timeline date must be YYYY-MM-DD.");
+                const before = parseInt(String(visibleDaysBeforeDraft).trim(), 10);
+                const after = parseInt(String(visibleDaysAfterDraft).trim(), 10);
+                if (!Number.isFinite(before) || !Number.isFinite(after)) {
+                    setDisplaySaveErr("請輸入有效的整數天數。");
                     return;
                 }
-                const anchor = dateAtNoonFromYMD(ymd);
-                setTimelineAnchor(anchor);
-                persistAdminSnapshot({ timelineYmd: ymd });
-                setDisplaySaveMsg("Timeline display saved.");
+                if (before < 0 || after < 0 || before > 730 || after > 730) {
+                    setDisplaySaveErr("天數須為 0～730 的整數。");
+                    return;
+                }
+                setVisibleDaysBefore(before);
+                setVisibleDaysAfter(after);
+                persistAdminSnapshot({ visibleDaysBefore: before, visibleDaysAfter: after });
+                setDisplaySaveMsg("可視範圍已儲存。");
             };
 
-            const resetTimelineDraftBuiltin = () => {
-                setTimelineDateDraft(formatDate(getTaiwanTodayNoon()));
+            const resetVisibleRangeDraftBuiltin = () => {
+                setVisibleDaysBeforeDraft(String(DEFAULT_VISIBLE_DAYS_BEFORE));
+                setVisibleDaysAfterDraft(String(DEFAULT_VISIBLE_DAYS_AFTER));
                 setDisplaySaveErr("");
-                setDisplaySaveMsg("Form set to Taiwan today (click Save to apply).");
+                setDisplaySaveMsg("已帶入內建預設（前 7 天、後 90 天），可按儲存套用。");
             };
-
             const handleFilterToggle = (list, setList, item) => {
                 if (item === 'All') setList([]);
                 else setList(prev => prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]);
             };
 
-            const days = useMemo(() => {
+            const { days, taiwanToday } = useMemo(() => {
+                const today = getTaiwanTodayNoon();
                 const arr = [];
-                const startLimit = new Date(timelineAnchor);
-                startLimit.setDate(timelineAnchor.getDate() - 7);
-                const endLimit = new Date(timelineAnchor);
-                endLimit.setMonth(endLimit.getMonth() + 3);
+                const startLimit = new Date(today);
+                startLimit.setDate(today.getDate() - visibleDaysBefore);
+                const endLimit = new Date(today);
+                endLimit.setDate(today.getDate() + visibleDaysAfter);
                 let curr = new Date(startLimit);
                 while (curr <= endLimit) {
                     arr.push(new Date(curr));
                     curr.setDate(curr.getDate() + 1);
                 }
-                return arr;
-            }, [timelineAnchor]);
+                return { days: arr, taiwanToday: today };
+            }, [visibleDaysBefore, visibleDaysAfter]);
 
             const monthGroups = useMemo(() => {
                 const groups = [];
@@ -495,8 +684,9 @@
             }, [days]);
 
             const groupedData = useMemo(() => {
+                const seriesFallback = seriesList[0] || "Unknown";
                 const filtered = tasks.filter(t => {
-                    const matchCat = selectedCategories.length === 0 || selectedCategories.includes(formatText(t.category));
+                    const matchCat = selectedSeries.length === 0 || selectedSeries.includes(formatText(t.category));
                     const hasSite = selectedSites.length > 0, hasPic = selectedPics.length > 0;
                     let matchLoc = (hasSite ? selectedSites.includes(formatText(t.site)) : false) || 
                                    (hasPic ? selectedPics.some(p => formatText(t.pic).toLowerCase().includes(p.toLowerCase())) : false);
@@ -505,7 +695,7 @@
                 const groups = {};
                 dynamicOptions.categories.forEach(c => groups[c] = {});
                 filtered.forEach(t => {
-                    const c = formatText(t.category || (DEFAULT_CATEGORIES[0] || 'Gen10')), p = formatText(t.project || 'Unknown');
+                    const c = formatText(t.category || seriesFallback), p = formatText(t.project || 'Unknown');
                     if (!groups[c]) groups[c] = {};
                     if (!groups[c][p]) groups[c][p] = [];
                     groups[c][p].push(t);
@@ -516,7 +706,7 @@
                     if (ps.length > 0) result.push({ category: c, projects: ps });
                 });
                 return result;
-            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions]);
+            }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList]);
 
             const resourceOverloadSet = useMemo(() => {
                 const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
@@ -558,7 +748,7 @@
                                 <span className="text-[10px] text-slate-400 font-black italic tracking-widest">@Dixon Chu</span>
                             </div>
                         </div>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center flex-wrap justify-end max-w-[min(100%,42rem)]">
                             <button
                                 type="button"
                                 onClick={() => setIsResourceCheckEnabled((prev) => {
@@ -572,9 +762,20 @@
                             </button>
                             <button
                                 type="button"
-                                onClick={() => openSettingsModal("gas")}
+                                onClick={() => copyShareableChartUrl("header")}
+                                className="px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight bg-violet-700 border-violet-500 hover:bg-violet-600 flex items-center gap-1"
+                                title="複製目前頁面網址並附上 ?gas=（含現用 GAS Web App），方便分享給他人"
+                            >
+                                <Icon name="link" size={14} className="inline" /> 分享連結
+                            </button>
+                            {headerShareLinkToast ? (
+                                <span className="text-[10px] font-black text-emerald-400 max-w-[10rem] leading-tight text-right shrink-0">{headerShareLinkToast}</span>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={() => openSettingsModal()}
                                 className="px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight bg-slate-700 border-slate-600 hover:bg-slate-600 flex items-center gap-1"
-                                title="Settings: Display, Admin, GAS URL"
+                                title="Settings: Display, Series & Site, Admin, GAS URL"
                             >
                                 <Icon name="settings" size={14} className="inline" /> Settings
                             </button>
@@ -592,7 +793,7 @@
 
                     {/* Filters & Legend */}
                     <div className="bg-slate-800 border-b border-slate-700 px-4 py-1.5 space-y-1.5 shrink-0 text-[10px] font-black text-slate-300">
-                        <FilterGroup label="GEN" options={dynamicOptions.categories} selectedList={selectedCategories} toggleFn={(i)=>handleFilterToggle(selectedCategories, setSelectedCategories, i)} colorClass="text-indigo-400" />
+                        <FilterGroup label="SERIES" options={dynamicOptions.categories} selectedList={selectedSeries} toggleFn={(i)=>handleFilterToggle(selectedSeries, setSelectedSeries, i)} colorClass="text-indigo-400" />
                         <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-700/50 pt-1.5 font-black">
                             <FilterGroup label="SITE" options={dynamicOptions.sites} selectedList={selectedSites} toggleFn={(i)=>handleFilterToggle(selectedSites, setSelectedSites, i)} colorClass="text-blue-400" />
                             <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
@@ -610,7 +811,7 @@
                     {/* New Project Control */}
                     {isEditMode && (
                         <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex justify-end shrink-0 z-[400]">
-                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: DEFAULT_CATEGORIES[0] || "Gen10", pic: DEFAULT_PICS[0] || "", site: DEFAULT_SITES[0] || "MX", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
+                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: seriesList[0] || "", pic: DEFAULT_PICS[0] || "", site: siteList[0] || "", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
                                 <Icon name="plus" size={14} className="inline mr-1" /> New Project
                             </button>
                         </div>
@@ -633,7 +834,7 @@
                                     {days.map((day, i) => {
                                         const dateNum = dateToNum(day);
                                         const holiday = isHoliday(day);
-                                        const isToday = dateNum === dateToNum(timelineAnchor);
+                                        const isToday = dateNum === dateToNum(taiwanToday);
                                         return (
                                             <th key={i} className={`w-8 h-8 border-r border-gray-200 text-[9px] py-1 font-mono text-center ${holiday ? 'bg-slate-200 text-red-500 font-black' : 'text-slate-500'} ${isToday ? 'bg-red-50 text-red-600 border-x-red-400 font-black' : ''}`}>
                                                 {day.getDate()}
@@ -644,10 +845,10 @@
                             </thead>
                             <tbody className="divide-y divide-gray-100 relative">
                                 {groupedData.map(group => {
-                                    const isCollapsed = collapsedCategories[group.category];
+                                    const isCollapsed = collapsedSeries[group.category];
                                     return (
                                         <React.Fragment key={group.category}>
-                                            <tr className="bg-slate-100 border-y border-slate-300 cursor-pointer hover:bg-slate-200/80 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedCategories(prev => ({...prev, [group.category]: !isCollapsed}))}>
+                                            <tr className="bg-slate-100 border-y border-slate-300 cursor-pointer hover:bg-slate-200/80 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedSeries(prev => ({...prev, [group.category]: !isCollapsed}))}>
                                                 <td className="sticky left-0 z-[50] bg-slate-100 px-3 py-1 font-black text-[11px] text-slate-800 flex items-center gap-2 shadow-[4px_0_8px_rgba(15,23,42,0.08)] border-r-2 border-slate-300">
                                                     <Icon name={isCollapsed ? "chevron-right" : "chevron-down"} size={12} />
                                                     <Icon name="folder-open" size={12} className="ml-1 text-blue-500" />
@@ -682,7 +883,7 @@
                                                                 </div>
                                                             </div>
                                                             <div className="flex items-center gap-1.5 flex-wrap font-black font-sans">
-                                                                <span className={`px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border ${CATEGORY_TAG_STYLE[group.category]}`}>{group.category}</span>
+                                                                <span className={`px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border ${seriesTagClass(group.category)}`}>{group.category}</span>
                                                                 <div className="flex items-center gap-1 text-blue-800 font-black text-[8px] bg-blue-100 px-1 rounded-sm border border-blue-200"><Icon name="user" size={8} /> {formatText(phases[0].pic)}</div>
                                                                 <div className="flex items-center gap-1 text-slate-700 font-black text-[8px] bg-slate-200 px-1 rounded-sm border border-slate-300"><Icon name="map-pin" size={8} /> {formatText(phases[0].site)}</div>
                                                             </div>
@@ -692,7 +893,7 @@
                                                         const dateNum = dateToNum(day);
                                                         const active = phases.find(t => dateNum >= strToNum(t.start) && dateNum <= strToNum(t.end));
                                                         const holiday = isHoliday(day);
-                                                        const isToday = dateNum === dateToNum(timelineAnchor);
+                                                        const isToday = dateNum === dateToNum(taiwanToday);
                                                         const typeKey = active ? normalizeTypeKey(active.type) : "";
                                                         const color = TYPE_COLORS[typeKey] || TYPE_COLORS.DevelopmentTNRS;
                                                         const isResourceOverloaded = isResourceCheckEnabled &&
@@ -747,16 +948,86 @@
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
                                             <Icon name="settings" size={20} className="text-blue-600" /> Settings
                                         </h3>
-                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Admin · GAS URL</p>
+                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Series &amp; Site · Admin · GAS URL</p>
                                     </div>
-                                    <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
+                                    {normalizeGasUrl(gasUrl) ? (
+                                        <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
+                                    ) : (
+                                        <span className="text-[10px] text-amber-700 font-black text-right max-w-[11rem] leading-tight">請先於「GAS URL」分頁貼上網址並儲存，或按「還原內建預設網址」後再關閉。</span>
+                                    )}
                                 </div>
                                 <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
-                                    <button type="button" onClick={() => setSettingsTab("display")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "display" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Display</button>
-                                    <button type="button" onClick={() => setSettingsTab("admin")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
-                                    <button type="button" onClick={() => setSettingsTab("gas")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
+                                    <button type="button" onClick={() => { setSettingsTab("display"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "display" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Display</button>
+                                    <button type="button" onClick={() => { setSettingsTab("labels"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "labels" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Series &amp; Site</button>
+                                    <button type="button" onClick={() => { setSettingsTab("admin"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
+                                    <button type="button" onClick={() => { setSettingsTab("gas"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
                                 </div>
                                 <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
+                                    {settingsTab === "display" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">可視日期範圍</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    甘特圖<strong>紅色「今日」線</strong>一律依<strong>台北時區（Asia/Taipei）的當日</strong>顯示，無需設定。此處僅設定時間軸上要顯示<strong>今日之前幾天</strong>與<strong>今日之後幾天</strong>（含今日當天在內的連續區間）。
+                                                </p>
+                                                <div className="flex flex-wrap items-end gap-4">
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">往前（天）</label>
+                                                        <input type="number" min={0} max={730} value={visibleDaysBeforeDraft} onChange={(e) => { setVisibleDaysBeforeDraft(e.target.value); setDisplaySaveErr(""); setDisplaySaveMsg(""); }} className="w-28 px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] font-mono outline-none focus:border-blue-500" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">往後（天）</label>
+                                                        <input type="number" min={0} max={730} value={visibleDaysAfterDraft} onChange={(e) => { setVisibleDaysAfterDraft(e.target.value); setDisplaySaveErr(""); setDisplaySaveMsg(""); }} className="w-28 px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] font-mono outline-none focus:border-blue-500" />
+                                                    </div>
+                                                </div>
+                                                {displaySaveErr && <p className="text-red-600 text-[10px] font-bold">{displaySaveErr}</p>}
+                                                {displaySaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{displaySaveMsg}</p>}
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={saveVisibleDateRange} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">儲存可視範圍</button>
+                                                    <button type="button" onClick={resetVisibleRangeDraftBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">帶入內建預設</button>
+                                                </div>
+                                            </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "labels" && (
+                                        <>
+                                            <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                此處維護<strong>篩選與下拉選單的候選 Series / Site</strong>（存於本瀏覽器）。試算表欄位仍為 <code className="bg-slate-100 px-1 rounded">category</code> / <code className="bg-slate-100 px-1 rounded">site</code>；資料中已出現的值會自動併入選項。
+                                            </p>
+                                            {labelsTabErr && <p className="text-red-600 text-[10px] font-bold">{labelsTabErr}</p>}
+                                            {labelsTabMsg && <p className="text-emerald-700 text-[10px] font-bold">{labelsTabMsg}</p>}
+                                            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Series 清單</h4>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <input value={newSeriesInput} onChange={(e) => { setNewSeriesInput(e.target.value); setLabelsTabErr(""); setLabelsTabMsg(""); }} onKeyDown={(e) => e.key === "Enter" && addSeriesItem()} placeholder="新增 Series 名稱" className="min-w-[12rem] flex-1 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] outline-none focus:border-blue-500" maxLength={120} />
+                                                    <button type="button" onClick={addSeriesItem} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shrink-0">新增</button>
+                                                </div>
+                                                <ul className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
+                                                    {seriesList.map((name) => (
+                                                        <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                                            <span className={`px-2 py-0.5 rounded border text-[10px] font-black ${seriesTagClass(name)}`}>{name}</span>
+                                                            <button type="button" onClick={() => removeSeriesItem(name)} disabled={seriesList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </section>
+                                            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Site 清單</h4>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <input value={newSiteInput} onChange={(e) => { setNewSiteInput(e.target.value); setLabelsTabErr(""); setLabelsTabMsg(""); }} onKeyDown={(e) => e.key === "Enter" && addSiteItem()} placeholder="新增 Site" className="min-w-[12rem] flex-1 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] outline-none focus:border-blue-500" maxLength={120} />
+                                                    <button type="button" onClick={addSiteItem} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shrink-0">新增</button>
+                                                </div>
+                                                <ul className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
+                                                    {siteList.map((name) => (
+                                                        <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                                            <span className="font-mono text-slate-800">{name}</span>
+                                                            <button type="button" onClick={() => removeSiteItem(name)} disabled={siteList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </section>
+                                        </>
+                                    )}
                                     {settingsTab === "admin" && (
                                         <>
                                             <section className="space-y-3">
@@ -782,24 +1053,6 @@
                                             </section>
                                         </>
                                     )}
-                                    {settingsTab === "display" && (
-                                        <>
-                                            <section className="space-y-3">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Timeline display</h4>
-                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                    設定甘特圖<strong>紅色「今日」參考線</strong>對齊哪一天，以及<strong>可見日期範圍</strong>（由此基準日往前約一週、往後約三個月）。不影響試算表內實際資料。
-                                                </p>
-                                                <label className="block text-[9px] font-black text-slate-400 uppercase">Timeline reference date</label>
-                                                <input type="date" value={timelineDateDraft} onChange={(e) => setTimelineDateDraft(e.target.value)} className="px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500 font-mono max-w-xs" />
-                                                {displaySaveErr && <p className="text-red-600 text-[10px] font-bold">{displaySaveErr}</p>}
-                                                {displaySaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{displaySaveMsg}</p>}
-                                                <div className="flex flex-wrap gap-2">
-                                                    <button type="button" onClick={saveTimelineDisplay} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">Save timeline</button>
-                                                    <button type="button" onClick={resetTimelineDraftBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">Use Taiwan today in form</button>
-                                                </div>
-                                            </section>
-                                        </>
-                                    )}
                                     {settingsTab === "gas" && (
                                         <>
                                             <section className="space-y-3">
@@ -813,6 +1066,20 @@
                                                         {normalizeGasUrl(gasUrl) || <span className="text-amber-700 font-sans">（尚未設定 — 請在下方貼上網址並儲存）</span>}
                                                     </div>
                                                 </div>
+                                                {normalizeGasUrl(gasUrl) && (
+                                                    <div className="rounded-xl border-2 border-violet-200 bg-violet-50/90 p-3 space-y-2">
+                                                        <div className="text-[9px] font-black uppercase text-violet-800 tracking-wider">分享連結（含 GAS URL）</div>
+                                                        <p className="text-[10px] text-violet-900 font-bold leading-relaxed">
+                                                            以下為<strong>目前頁面網址</strong>並附上 <code className="bg-white/80 px-1 rounded border border-violet-200">?gas=</code> 參數。他人開啟後會自動使用同一支 Web App（並寫入對方瀏覽器）。若部署含敏感資料請勿公開分享。
+                                                        </p>
+                                                        <p className="text-[9px] text-violet-700/90 font-bold leading-relaxed">若連結為 <code className="bg-white/60 px-0.5 rounded">localhost</code> 或本機路徑，僅在該環境有效；要給他人請將本頁架在可公開存取的網址後再複製。</p>
+                                                        <input readOnly value={shareableChartUrl} onFocus={(e) => e.target.select()} className="w-full px-3 py-2 bg-white border-2 border-violet-200 rounded-xl text-[10px] font-mono text-violet-950 break-all outline-none focus:border-violet-500" spellCheck={false} />
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <button type="button" onClick={() => copyShareableChartUrl("settings")} className="px-4 py-2 bg-violet-700 text-white font-black rounded-xl hover:bg-violet-800 transition-all uppercase text-[10px]">複製分享連結</button>
+                                                            {shareLinkCopyMsg ? <span className="text-emerald-700 text-[10px] font-bold">{shareLinkCopyMsg}</span> : null}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </section>
                                             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                                                 <h4 className="text-[11px] font-black text-slate-700 border-b border-slate-200 pb-2">如何建立專屬 GAS Web App 網址（初學指引）</h4>
@@ -861,7 +1128,7 @@
                                             <input value={modalData.project} onChange={e=>setModalData({...modalData, project: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-black text-blue-600 outline-none focus:ring-1 focus:ring-blue-500 font-black font-sans font-black" />
                                         </div>
                                         <div className="font-black">
-                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 underline decoration-blue-400 font-black">Gen</label>
+                                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 underline decoration-blue-400 font-black">Series</label>
                                             <select value={modalData.category} onChange={e=>setModalData({...modalData, category: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border rounded-lg font-black outline-none font-black font-sans">
                                                 {dynamicOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
                                             </select>
