@@ -38,7 +38,7 @@ python -m http.server 5500
 ## 使用流程
 
 1. 進入頁面後會自動向雲端拉取資料（須已設定 GAS URL；若首次使用未儲存網址，會先跳出設定並請完成 **GAS URL**）。
-2. 點右上角 **Settings** 預設會開啟 **Display** 分頁；可切換 **Series & Site**、**Admin**、**GAS URL**。主畫面右上角 **分享連結** 可一鍵複製含 `?gas=` 的網址（與 Settings → GAS URL 內功能相同）。
+2. 點右上角 **Settings** 預設會開啟 **Display** 分頁；可切換 **Series**、**Phase**、**Site**、**Admin**、**GAS URL**。主畫面右上角 **分享連結** 可一鍵複製含 `?gas=` 的網址（與 Settings → GAS URL 內功能相同）。
 3. 使用上方篩選列切換 **SERIES / SITE / PIC**。
 4. 開啟 **Settings → Admin**，輸入密碼後按 **Enable edit mode** 進入編輯模式。
 5. 點 `New Project` 可新增專案與多個 phase。
@@ -53,7 +53,7 @@ python -m http.server 5500
 - `pic`: 負責人（可用 `/`、`,`、`，`、`&` 分隔多人）
 - `site`: 廠區（例如 `MX`、`LZ`）
 - `task`: 工作描述
-- `type`: 階段類型（`Development` / `PreGolden` / `GoldenFPY`）
+- `type`: 階段類型（即 Phase 的 key；內建有 `DevelopmentTNRS` / `DevelopmentPI` / `PreGolden` / `GoldenFPY` / `VB`，亦可在 Settings 自訂新增）
 - `start`: 開始日期（`YYYY-MM-DD`）
 - `end`: 結束日期（`YYYY-MM-DD`）
 
@@ -68,7 +68,12 @@ python -m http.server 5500
   - 在 **Settings → Display** 修改並按「儲存標題」：前端 POST `{ action: "setTitle", title }`，GAS 端呼叫 `ss.rename(...)` 重新命名整本試算表；其他使用者重新整理後即會同步。
   - GAS 端需在 `doGet(e)` 加 `?meta=1` 分支、在 `doPost(e)` 加 `setTitle` 分支；範例見 `.git/App.gs.js`。修改後請**重新部署 Web App**；第一次重新命名可能需在 Apps Script 編輯器手動執行一次以完成 Drive 授權。
   - 取不到試算表名稱時（例如 GAS 尚未部署支援 `?meta=1` 的版本）使用後備預設 `DEFAULT_CHART_TITLE`。
-- **Series / Site 候選清單**：在 **Settings → Series & Site** 管理（存於 `localStorage` 的 `monica-npi-admin-prefs`）；內建預設見 `INITIAL_SERIES_LIST` / `INITIAL_SITE_LIST`。篩選選項會與試算表資料中已出現的 `category` / `site` 合併。**PIC** 候選仍由 `DEFAULT_PICS` 與資料中的 `pic` 合併。
+- **Series / Phase / Site 候選清單**：在 **Settings** 中各自獨立的分頁管理（皆存於 `localStorage` 的 `monica-npi-admin-prefs`）。
+  - **Series**：在 **Settings → Series** 新增 / 刪除，並可逐項點色塊調整 Series 標籤顯示顏色（會即時反映在主畫面的專案列）。內建預設見 `INITIAL_SERIES_LIST` 與 `INITIAL_SERIES_COLORS`，新增 Series 時會依 `SERIES_COLOR_PALETTE` 自動分配顏色。
+  - **Phase**：在 **Settings → Phase** 新增 / 刪除 / 重新命名，並可逐項調整顯示顏色（即 Gantt 色塊與 Legend 的顏色）。內建預設見 `INITIAL_PHASE_LIST`。Phase 的內部 `key`（即試算表 `type` 欄位儲存的值）會依名稱自動產生，避免與既有資料衝突。
+  - **Site**：在 **Settings → Site** 新增 / 刪除，內建預設見 `INITIAL_SITE_LIST`。
+  - 篩選選項會與試算表資料中已出現的 `category` / `site` 合併；**PIC** 候選仍由 `DEFAULT_PICS` 與資料中的 `pic` 合併。
+  - **Resource Check** 仰賴 `DevelopmentTNRS` 與 `DevelopmentPI` 兩個 key；若於 Settings 刪除這兩個 Phase，超載偵測將不會觸發（其他 Phase 不影響）。
 
 ## 安全與維護建議
 

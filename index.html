@@ -140,14 +140,77 @@
         const INITIAL_SITE_LIST = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
         const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
 
-        const CATEGORY_TAG_STYLE = {
-            'Gen10': 'bg-slate-300 text-slate-800 border-slate-400',
-            'Gen11': 'bg-blue-200 text-blue-800 border-blue-300',
-            'Gen12 AMD': 'bg-red-200 text-red-800 border-red-300',
-            'Gen12 Intel': 'bg-cyan-200 text-cyan-800 border-cyan-300'
+        const INITIAL_SERIES_COLORS = {
+            'Gen10': '#cbd5e1',     // slate-300
+            'Gen11': '#bfdbfe',     // blue-200
+            'Gen12 AMD': '#fecaca', // red-200
+            'Gen12 Intel': '#a5f3fc'// cyan-200
         };
 
-        const seriesTagClass = (name) => CATEGORY_TAG_STYLE[name] || 'bg-slate-200 text-slate-800 border-slate-300';
+        const INITIAL_PHASE_LIST = [
+            { key: 'DevelopmentTNRS', label: 'Development (TN-RS)', color: '#facc15' },
+            { key: 'DevelopmentPI',   label: 'Development (PI) & Pre-golden start', color: '#f97316' },
+            { key: 'PreGolden',       label: 'Pre-golden Validation', color: '#3b82f6' },
+            { key: 'GoldenFPY',       label: 'Golden FPY', color: '#22c55e' },
+            { key: 'VB',              label: 'VB', color: '#b45309' }
+        ];
+
+        const DEFAULT_SERIES_COLOR = '#cbd5e1';
+        const DEFAULT_PHASE_COLOR = '#94a3b8';
+
+        // 新增 Series 時自動分配的調色盤
+        const SERIES_COLOR_PALETTE = [
+            '#bfdbfe', '#fecaca', '#a5f3fc', '#fef08a', '#bbf7d0',
+            '#ddd6fe', '#fbcfe8', '#fed7aa', '#cffafe', '#e9d5ff'
+        ];
+
+        const parseHexColor = (raw, fallback = DEFAULT_SERIES_COLOR) => {
+            const s = String(raw || '').trim();
+            if (/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+            if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+                const m = s.slice(1);
+                return ('#' + m[0]+m[0] + m[1]+m[1] + m[2]+m[2]).toLowerCase();
+            }
+            return fallback;
+        };
+
+        const getReadableTextColor = (hex) => {
+            const s = parseHexColor(hex, '#cbd5e1');
+            const r = parseInt(s.slice(1,3), 16);
+            const g = parseInt(s.slice(3,5), 16);
+            const b = parseInt(s.slice(5,7), 16);
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+            return brightness > 140 ? '#0f172a' : '#ffffff';
+        };
+
+        const seriesTagStyle = (name, seriesColors) => {
+            const bg = parseHexColor((seriesColors || {})[name], DEFAULT_SERIES_COLOR);
+            return {
+                backgroundColor: bg,
+                color: getReadableTextColor(bg),
+                borderColor: 'rgba(15,23,42,0.18)'
+            };
+        };
+
+        const getPhaseInfo = (phaseList, key) => {
+            if (Array.isArray(phaseList)) {
+                const found = phaseList.find(p => p && p.key === key);
+                if (found) return found;
+                if (phaseList[0]) return phaseList[0];
+            }
+            return { key: key || 'phase', label: key || 'Phase', color: DEFAULT_PHASE_COLOR };
+        };
+
+        const makeUniquePhaseKey = (label, list) => {
+            const taken = new Set((list || []).map(p => p.key));
+            const base = String(label || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || 'phase';
+            let candidate = base, i = 2;
+            while (taken.has(candidate)) {
+                candidate = base + i;
+                i++;
+            }
+            return candidate;
+        };
 
         const normalizeLabelList = (arr) => {
             const seen = new Set();
@@ -162,13 +225,50 @@
         };
 
         const readInitialAdminPrefs = () => {
+            const buildSeriesColors = (raw, names) => {
+                const out = {};
+                if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                    Object.entries(raw).forEach(([name, col]) => {
+                        const trimmed = String(name || '').trim();
+                        if (trimmed) out[trimmed] = parseHexColor(col, DEFAULT_SERIES_COLOR);
+                    });
+                }
+                (Array.isArray(names) ? names : []).forEach((name, idx) => {
+                    if (!out[name]) {
+                        out[name] = INITIAL_SERIES_COLORS[name]
+                            || SERIES_COLOR_PALETTE[idx % SERIES_COLOR_PALETTE.length];
+                    }
+                });
+                return out;
+            };
+
+            const buildPhaseList = (raw) => {
+                if (!Array.isArray(raw)) return INITIAL_PHASE_LIST.map(p => ({ ...p }));
+                const seen = new Set();
+                const out = [];
+                raw.forEach((item) => {
+                    if (!item || typeof item !== 'object') return;
+                    const key = String(item.key || '').trim();
+                    const label = String(item.label || '').replace(/[\r\n]+/g, ' ').trim();
+                    if (!key || !label) return;
+                    if (key.length > 60 || label.length > 120) return;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    out.push({ key, label, color: parseHexColor(item.color, DEFAULT_PHASE_COLOR) });
+                });
+                if (!out.length) return INITIAL_PHASE_LIST.map(p => ({ ...p }));
+                return out;
+            };
+
             const fallback = {
                 editPassword: DEFAULT_EDIT_PASSWORD,
                 visibleDaysBefore: DEFAULT_VISIBLE_DAYS_BEFORE,
                 visibleDaysAfter: DEFAULT_VISIBLE_DAYS_AFTER,
                 resourceCheckEnabled: false,
                 seriesList: [...INITIAL_SERIES_LIST],
-                siteList: [...INITIAL_SITE_LIST]
+                siteList: [...INITIAL_SITE_LIST],
+                seriesColors: buildSeriesColors(null, INITIAL_SERIES_LIST),
+                phaseList: INITIAL_PHASE_LIST.map(p => ({ ...p }))
             };
             try {
                 const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
@@ -196,21 +296,15 @@
                     visibleDaysAfter: clampInt(p.visibleDaysAfter, fallback.visibleDaysAfter, 0, 730),
                     resourceCheckEnabled: p.resourceCheckEnabled === true,
                     seriesList,
-                    siteList
+                    siteList,
+                    seriesColors: buildSeriesColors(p.seriesColors, seriesList),
+                    phaseList: buildPhaseList(p.phaseList)
                 };
             } catch (e) {
                 return fallback;
             }
         };
         
-        const TYPE_COLORS = {
-            DevelopmentTNRS: { bg: "bg-yellow-400", border: "border-yellow-600", label: "Development (TN-RS)" },
-            DevelopmentPI: { bg: "bg-orange-500", border: "border-orange-700", label: "Development (PI) & Pre-golden start" },
-            PreGolden: { bg: "bg-blue-500", border: "border-blue-700", label: "Pre-golden Validation" },
-            GoldenFPY: { bg: "bg-green-500", border: "border-green-700", label: "Golden FPY" },
-            VB: { bg: "bg-amber-700", border: "border-amber-900", label: "VB" }
-        };
-
         const TYPE_MAPPER = {
             "Dev": "DevelopmentTNRS", "Development": "DevelopmentTNRS", "Development (TN-RS)": "DevelopmentTNRS", "DevelopmentTNRS": "DevelopmentTNRS",
             "Development (PI)": "DevelopmentPI", "Development (PI) & Pre-golden start": "DevelopmentPI", "PI": "DevelopmentPI", "DevelopmentPI": "DevelopmentPI",
@@ -273,19 +367,25 @@
             return parseInt(p[0]) * 10000 + parseInt(p[1]) * 100 + parseInt(p[2]);
         };
 
-        const normalizeTypeKey = (rawType) => {
+        const DEFAULT_PHASE_KEYS = INITIAL_PHASE_LIST.map(p => p.key);
+
+        const normalizeTypeKey = (rawType, validKeys) => {
+            const keys = (Array.isArray(validKeys) && validKeys.length) ? validKeys : DEFAULT_PHASE_KEYS;
+            const valid = new Set(keys);
+            const fallback = keys[0];
             const raw = formatText(rawType).trim();
-            if (!raw) return "DevelopmentTNRS";
-            if (TYPE_COLORS[raw]) return raw;
-            if (TYPE_MAPPER[raw]) return TYPE_MAPPER[raw];
+            if (!raw) return fallback;
+            if (valid.has(raw)) return raw;
+            const mapped = TYPE_MAPPER[raw];
+            if (mapped && valid.has(mapped)) return mapped;
 
             const lower = raw.toLowerCase();
-            if (lower.includes('pi')) return "DevelopmentPI";
-            if (lower.includes('pre-golden')) return "PreGolden";
-            if (lower.includes('golden')) return "GoldenFPY";
-            if (lower.includes('vb') || lower.includes('v/b')) return "VB";
-            if (lower.includes('dev')) return "DevelopmentTNRS";
-            return "DevelopmentTNRS";
+            if (lower.includes('pi') && valid.has("DevelopmentPI")) return "DevelopmentPI";
+            if (lower.includes('pre-golden') && valid.has("PreGolden")) return "PreGolden";
+            if (lower.includes('golden') && valid.has("GoldenFPY")) return "GoldenFPY";
+            if ((lower.includes('vb') || lower.includes('v/b')) && valid.has("VB")) return "VB";
+            if (lower.includes('dev') && valid.has("DevelopmentTNRS")) return "DevelopmentTNRS";
+            return fallback;
         };
 
         const FilterGroup = ({ label, options, selectedList, toggleFn, colorClass }) => (
@@ -336,10 +436,16 @@
 
             const [seriesList, setSeriesList] = useState(() => readInitialAdminPrefs().seriesList);
             const [siteList, setSiteList] = useState(() => readInitialAdminPrefs().siteList);
+            const [seriesColors, setSeriesColors] = useState(() => readInitialAdminPrefs().seriesColors);
+            const [phaseList, setPhaseList] = useState(() => readInitialAdminPrefs().phaseList);
             const [newSeriesInput, setNewSeriesInput] = useState("");
             const [newSiteInput, setNewSiteInput] = useState("");
+            const [newPhaseLabel, setNewPhaseLabel] = useState("");
+            const [newPhaseColor, setNewPhaseColor] = useState("#94a3b8");
             const [labelsTabErr, setLabelsTabErr] = useState("");
             const [labelsTabMsg, setLabelsTabMsg] = useState("");
+
+            const phaseKeys = useMemo(() => phaseList.map(p => p.key), [phaseList]);
 
             const initialGasUrl = useMemo(() => readInitialGasUrl(), []);
             const [gasUrl, setGasUrl] = useState(initialGasUrl);
@@ -380,10 +486,12 @@
                     visibleDaysAfter: overrides.visibleDaysAfter !== undefined ? overrides.visibleDaysAfter : visibleDaysAfter,
                     resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled,
                     seriesList: overrides.seriesList !== undefined ? overrides.seriesList : seriesList,
-                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList
+                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList,
+                    seriesColors: overrides.seriesColors !== undefined ? overrides.seriesColors : seriesColors,
+                    phaseList: overrides.phaseList !== undefined ? overrides.phaseList : phaseList
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList]);
+            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList, seriesColors, phaseList]);
 
             const effectiveChartTitle = useMemo(() => {
                 const r = (remoteChartTitle || "").trim();
@@ -407,11 +515,15 @@
                     return;
                 }
                 const next = [...seriesList, s];
+                const newColor = INITIAL_SERIES_COLORS[s]
+                    || SERIES_COLOR_PALETTE[next.length % SERIES_COLOR_PALETTE.length];
+                const nextColors = { ...seriesColors, [s]: parseHexColor(newColor, DEFAULT_SERIES_COLOR) };
                 setSeriesList(next);
+                setSeriesColors(nextColors);
                 setNewSeriesInput("");
-                persistAdminSnapshot({ seriesList: next });
+                persistAdminSnapshot({ seriesList: next, seriesColors: nextColors });
                 setLabelsTabMsg("已新增 Series。");
-            }, [newSeriesInput, seriesList, persistAdminSnapshot]);
+            }, [newSeriesInput, seriesList, seriesColors, persistAdminSnapshot]);
 
             const removeSeriesItem = useCallback((name) => {
                 setLabelsTabErr("");
@@ -421,8 +533,11 @@
                     return;
                 }
                 const next = seriesList.filter((x) => x !== name);
+                const nextColors = { ...seriesColors };
+                delete nextColors[name];
                 setSeriesList(next);
-                persistAdminSnapshot({ seriesList: next });
+                setSeriesColors(nextColors);
+                persistAdminSnapshot({ seriesList: next, seriesColors: nextColors });
                 setSelectedSeries((sel) => sel.filter((x) => x !== name));
                 setCollapsedSeries((prev) => {
                     const cp = { ...prev };
@@ -431,7 +546,78 @@
                 });
                 setModalData((md) => (md.category === name ? { ...md, category: next[0] || "" } : md));
                 setLabelsTabMsg("已刪除 Series。");
-            }, [seriesList, persistAdminSnapshot]);
+            }, [seriesList, seriesColors, persistAdminSnapshot]);
+
+            const updateSeriesColor = useCallback((name, color) => {
+                const hex = parseHexColor(color, DEFAULT_SERIES_COLOR);
+                setSeriesColors((prev) => {
+                    if (prev[name] === hex) return prev;
+                    const next = { ...prev, [name]: hex };
+                    persistAdminSnapshot({ seriesColors: next });
+                    return next;
+                });
+            }, [persistAdminSnapshot]);
+
+            const addPhaseItem = useCallback(() => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                const label = newPhaseLabel.trim();
+                if (!label) {
+                    setLabelsTabErr("請輸入 Phase 名稱。");
+                    return;
+                }
+                if (label.length > 120) {
+                    setLabelsTabErr("Phase 名稱不可超過 120 字元。");
+                    return;
+                }
+                if (phaseList.some((p) => p.label === label)) {
+                    setLabelsTabErr("已存在相同名稱的 Phase。");
+                    return;
+                }
+                const key = makeUniquePhaseKey(label, phaseList);
+                const next = [...phaseList, { key, label, color: parseHexColor(newPhaseColor, DEFAULT_PHASE_COLOR) }];
+                setPhaseList(next);
+                setNewPhaseLabel("");
+                persistAdminSnapshot({ phaseList: next });
+                setLabelsTabMsg("已新增 Phase。");
+            }, [newPhaseLabel, newPhaseColor, phaseList, persistAdminSnapshot]);
+
+            const removePhaseItem = useCallback((key) => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                if (phaseList.length <= 1) {
+                    setLabelsTabErr("至少須保留一個 Phase。");
+                    return;
+                }
+                const next = phaseList.filter((p) => p.key !== key);
+                const replacement = next[0].key;
+                setPhaseList(next);
+                persistAdminSnapshot({ phaseList: next });
+                setModalData((md) => ({
+                    ...md,
+                    phases: (md.phases || []).map((p) => p.type === key ? { ...p, type: replacement } : p)
+                }));
+                setLabelsTabMsg("已刪除 Phase。");
+            }, [phaseList, persistAdminSnapshot]);
+
+            const updatePhaseColor = useCallback((key, color) => {
+                const hex = parseHexColor(color, DEFAULT_PHASE_COLOR);
+                setPhaseList((prev) => {
+                    const next = prev.map((p) => p.key === key ? { ...p, color: hex } : p);
+                    persistAdminSnapshot({ phaseList: next });
+                    return next;
+                });
+            }, [persistAdminSnapshot]);
+
+            const updatePhaseLabel = useCallback((key, nextLabel) => {
+                const trimmed = String(nextLabel || '').replace(/[\r\n]+/g, ' ').slice(0, 120);
+                if (!trimmed.trim()) return;
+                setPhaseList((prev) => {
+                    const next = prev.map((p) => p.key === key ? { ...p, label: trimmed } : p);
+                    persistAdminSnapshot({ phaseList: next });
+                    return next;
+                });
+            }, [persistAdminSnapshot]);
 
             const addSiteItem = useCallback(() => {
                 setLabelsTabErr("");
@@ -539,11 +725,15 @@
 
             const openSettingsModal = (tab) => {
                 let t = "display";
-                if (tab === "labels") t = "labels";
+                if (tab === "series" || tab === "labels") t = "series";
+                else if (tab === "phase") t = "phase";
+                else if (tab === "site") t = "site";
                 else if (tab === "admin") t = "admin";
                 else if (tab === "gas") t = "gas";
                 else if (tab === "display") t = "display";
                 setSettingsTab(t);
+                setNewPhaseLabel("");
+                setNewPhaseColor("#94a3b8");
                 setGasUrlDraft(gasUrl || "");
                 setSettingsUrlError("");
                 setSettingsTestOk("");
@@ -802,7 +992,7 @@
 
                         group.projects.forEach(([, phases]) => {
                             const hasActiveDevPhase = phases.some(phase => {
-                                const phaseType = normalizeTypeKey(phase.type);
+                                const phaseType = normalizeTypeKey(phase.type, phaseKeys);
                                 return trackedTypes.has(phaseType) && dateNum >= strToNum(phase.start) && dateNum <= strToNum(phase.end);
                             });
                             if (hasActiveDevPhase) activeDevProjectCount += 1;
@@ -815,7 +1005,7 @@
                 });
 
                 return overloaded;
-            }, [groupedData, days]);
+            }, [groupedData, days, phaseKeys]);
 
             return (
                 <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
@@ -881,9 +1071,9 @@
                             <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
                         </div>
                         <div className="flex flex-wrap gap-4 pt-1.5 border-t border-slate-700/30 text-gray-300 font-black uppercase">
-                            {Object.entries(TYPE_COLORS).map(([key, info]) => (
-                                <div key={key} className="flex items-center gap-1 font-black">
-                                    <div className={`w-2.5 h-2.5 rounded-sm ${info.bg} border ${info.border}`}></div> 
+                            {phaseList.map((info) => (
+                                <div key={info.key} className="flex items-center gap-1 font-black">
+                                    <div className="w-2.5 h-2.5 rounded-sm border" style={{ backgroundColor: info.color, borderColor: 'rgba(15,23,42,0.4)' }}></div>
                                     <span className="uppercase tracking-tighter opacity-80">{info.label}</span>
                                 </div>
                             ))}
@@ -944,7 +1134,7 @@
                                                     const dateNum = dateToNum(day);
                                                     if (!resourceOverloadSet.has(`${group.category}|${dateNum}`)) return false;
                                                     return phases.some(phase => {
-                                                        const phaseType = normalizeTypeKey(phase.type);
+                                                        const phaseType = normalizeTypeKey(phase.type, phaseKeys);
                                                         const isDevType = phaseType === "DevelopmentTNRS" || phaseType === "DevelopmentPI";
                                                         return isDevType && dateNum >= strToNum(phase.start) && dateNum <= strToNum(phase.end);
                                                     });
@@ -954,7 +1144,7 @@
                                                 <tr key={projName} className={`group/row relative transition-colors hover:z-[200] ${projectHasResourceRisk ? 'bg-red-50 hover:bg-red-100' : `hover:bg-sky-50 ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}`}>
                                                     <td onClick={() => {if(isEditMode) {
                                                         setOriginalProjectName(projName);
-                                                        setModalData({ project: projName, category: phases[0].category, pic: phases[0].pic, site: phases[0].site, phases: phases.map((p,idx)=>({...p, type: normalizeTypeKey(p.type), localId: Date.now()+idx})) });
+                                                        setModalData({ project: projName, category: phases[0].category, pic: phases[0].pic, site: phases[0].site, phases: phases.map((p,idx)=>({...p, type: normalizeTypeKey(p.type, phaseKeys), localId: Date.now()+idx})) });
                                                         setShowModal(true);
                                                     }}} className={`w-72 sticky left-0 z-[50] border-r-2 border-gray-300 py-1 px-4 shadow-[4px_0_8px_rgba(15,23,42,0.08)] ${projectHasResourceRisk ? 'bg-red-100 group-hover/row:bg-red-100 border-l-4 border-l-red-500' : `group-hover/row:bg-sky-100 ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`} ${isEditMode && !projectHasResourceRisk ? 'cursor-pointer border-l-4 border-l-orange-500 transition-all' : isEditMode ? 'cursor-pointer transition-all' : ''}`}>
                                                         <div className="flex flex-col gap-0.5 text-left font-black font-sans">
@@ -965,7 +1155,7 @@
                                                                 </div>
                                                             </div>
                                                             <div className="flex items-center gap-1.5 flex-wrap font-black font-sans">
-                                                                <span className={`px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border ${seriesTagClass(group.category)}`}>{group.category}</span>
+                                                                <span className="px-1.5 py-0.5 rounded-[2px] text-[7px] font-black border" style={seriesTagStyle(group.category, seriesColors)}>{group.category}</span>
                                                                 <div className="flex items-center gap-1 text-blue-800 font-black text-[8px] bg-blue-100 px-1 rounded-sm border border-blue-200"><Icon name="user" size={8} /> {formatText(phases[0].pic)}</div>
                                                                 <div className="flex items-center gap-1 text-slate-700 font-black text-[8px] bg-slate-200 px-1 rounded-sm border border-slate-300"><Icon name="map-pin" size={8} /> {formatText(phases[0].site)}</div>
                                                             </div>
@@ -976,8 +1166,9 @@
                                                         const active = phases.find(t => dateNum >= strToNum(t.start) && dateNum <= strToNum(t.end));
                                                         const holiday = isHoliday(day);
                                                         const isToday = dateNum === dateToNum(taiwanToday);
-                                                        const typeKey = active ? normalizeTypeKey(active.type) : "";
-                                                        const color = TYPE_COLORS[typeKey] || TYPE_COLORS.DevelopmentTNRS;
+                                                        const typeKey = active ? normalizeTypeKey(active.type, phaseKeys) : "";
+                                                        const phaseInfo = getPhaseInfo(phaseList, typeKey);
+                                                        const phaseColor = phaseInfo.color || DEFAULT_PHASE_COLOR;
                                                         const isResourceOverloaded = isResourceCheckEnabled &&
                                                             active &&
                                                             (typeKey === "DevelopmentTNRS" || typeKey === "DevelopmentPI") &&
@@ -986,10 +1177,13 @@
                                                         return (
                                                             <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-200/50' : ''} ${isToday ? 'bg-red-100/30' : ''}`}>
                                                                 {active && (
-                                                                    <div className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} ${color.bg} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10 ${isResourceOverloaded ? 'ring-2 ring-red-600 ring-offset-0 border border-red-700' : ''}`}>
+                                                                    <div
+                                                                        className={`absolute inset-0 m-[1px] rounded-[2px] shadow-sm transition-all group/cell ${holiday ? 'opacity-40 grayscale-[0.3]' : 'opacity-95'} hover:opacity-100 hover:scale-110 z-[30] border-b-2 border-black/10 ${isResourceOverloaded ? 'ring-2 ring-red-600 ring-offset-0 border border-red-700' : ''}`}
+                                                                        style={{ backgroundColor: phaseColor }}
+                                                                    >
                                                                         <div className="absolute hidden group-hover/cell:flex flex-col top-[110%] left-1/2 -translate-x-1/2 w-80 bg-slate-950 text-white p-3 rounded-lg shadow-2xl text-[10px] z-[9999] border border-slate-700 ring-4 ring-black/10 pointer-events-none font-sans">
                                                                             <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-2 font-black">
-                                                                                <p className="font-black text-green-400 uppercase leading-none font-black">{color.label}</p>
+                                                                                <p className="font-black text-green-400 uppercase leading-none font-black">{phaseInfo.label}</p>
                                                                                 <p className="font-mono text-[9px] text-amber-400 font-bold leading-none whitespace-nowrap uppercase">
                                                                                     {formatDate(active.start)} ~ {formatDate(active.end)}
                                                                                 </p>
@@ -1030,7 +1224,7 @@
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
                                             <Icon name="settings" size={20} className="text-blue-600" /> Settings
                                         </h3>
-                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Series &amp; Site · Admin · GAS URL</p>
+                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Series · Phase · Site · Admin · GAS URL</p>
                                     </div>
                                     {normalizeGasUrl(gasUrl) ? (
                                         <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
@@ -1040,7 +1234,9 @@
                                 </div>
                                 <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
                                     <button type="button" onClick={() => { setSettingsTab("display"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "display" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Display</button>
-                                    <button type="button" onClick={() => { setSettingsTab("labels"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "labels" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Series &amp; Site</button>
+                                    <button type="button" onClick={() => { setSettingsTab("series"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "series" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Series</button>
+                                    <button type="button" onClick={() => { setSettingsTab("phase"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "phase" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Phase</button>
+                                    <button type="button" onClick={() => { setSettingsTab("site"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "site" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Site</button>
                                     <button type="button" onClick={() => { setSettingsTab("admin"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
                                     <button type="button" onClick={() => { setSettingsTab("gas"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
                                 </div>
@@ -1095,35 +1291,93 @@
                                             </section>
                                         </>
                                     )}
-                                    {settingsTab === "labels" && (
+                                    {settingsTab === "series" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                此處維護<strong>篩選與下拉選單的候選 Series / Site</strong>（存於本瀏覽器）。試算表欄位仍為 <code className="bg-slate-100 px-1 rounded">category</code> / <code className="bg-slate-100 px-1 rounded">site</code>；資料中已出現的值會自動併入選項。
+                                                維護<strong>專案分類 Series</strong>清單與<strong>顯示顏色</strong>（存於本瀏覽器）。試算表欄位仍為 <code className="bg-slate-100 px-1 rounded">category</code>，資料中已出現的值會自動併入篩選選項。點選色塊即可調整 Series 標籤顏色。
                                             </p>
                                             {labelsTabErr && <p className="text-red-600 text-[10px] font-bold">{labelsTabErr}</p>}
                                             {labelsTabMsg && <p className="text-emerald-700 text-[10px] font-bold">{labelsTabMsg}</p>}
                                             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Series 清單</h4>
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">新增 Series</h4>
                                                 <div className="flex flex-wrap gap-2">
                                                     <input value={newSeriesInput} onChange={(e) => { setNewSeriesInput(e.target.value); setLabelsTabErr(""); setLabelsTabMsg(""); }} onKeyDown={(e) => e.key === "Enter" && addSeriesItem()} placeholder="新增 Series 名稱" className="min-w-[12rem] flex-1 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] outline-none focus:border-blue-500" maxLength={120} />
                                                     <button type="button" onClick={addSeriesItem} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shrink-0">新增</button>
                                                 </div>
-                                                <ul className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
-                                                    {seriesList.map((name) => (
-                                                        <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                                                            <span className={`px-2 py-0.5 rounded border text-[10px] font-black ${seriesTagClass(name)}`}>{name}</span>
-                                                            <button type="button" onClick={() => removeSeriesItem(name)} disabled={seriesList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
-                                                        </li>
-                                                    ))}
+                                                <p className="text-[9px] text-slate-500 font-bold">新增後會自動分配一個預設色，可在下方逐項調整。</p>
+                                            </section>
+                                            <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Series 清單 / 顏色</h4>
+                                                <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1.5 text-[11px] font-bold">
+                                                    {seriesList.map((name) => {
+                                                        const hex = parseHexColor((seriesColors || {})[name], DEFAULT_SERIES_COLOR);
+                                                        return (
+                                                            <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                                    <input type="color" value={hex} onChange={(e) => updateSeriesColor(name, e.target.value)} className="w-7 h-7 rounded border border-slate-200 cursor-pointer bg-transparent shrink-0" title="調整顏色" />
+                                                                    <span className="px-2 py-0.5 rounded border text-[10px] font-black truncate" style={seriesTagStyle(name, seriesColors)}>{name}</span>
+                                                                    <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0">{hex}</span>
+                                                                </div>
+                                                                <button type="button" onClick={() => removeSeriesItem(name)} disabled={seriesList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                            </li>
+                                                        );
+                                                    })}
                                                 </ul>
                                             </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "phase" && (
+                                        <>
+                                            <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>（存於本瀏覽器）。Phase 對應試算表欄位 <code className="bg-slate-100 px-1 rounded">type</code>。可調整名稱與顏色、新增/刪除；Phase 的<strong>內部識別 key</strong> 自動依名稱產生，方便對應既有資料。
+                                            </p>
+                                            <p className="text-[9px] text-amber-700 font-bold leading-relaxed">提醒：<strong>Resource Check</strong> 仰賴 <code className="bg-white/70 px-1 rounded">DevelopmentTNRS</code> 與 <code className="bg-white/70 px-1 rounded">DevelopmentPI</code> 這兩個 key，若刪除可能會關閉超載偵測。</p>
+                                            {labelsTabErr && <p className="text-red-600 text-[10px] font-bold">{labelsTabErr}</p>}
+                                            {labelsTabMsg && <p className="text-emerald-700 text-[10px] font-bold">{labelsTabMsg}</p>}
                                             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Site 清單</h4>
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">新增 Phase</h4>
+                                                <div className="flex flex-wrap gap-2 items-center">
+                                                    <input value={newPhaseLabel} onChange={(e) => { setNewPhaseLabel(e.target.value); setLabelsTabErr(""); setLabelsTabMsg(""); }} onKeyDown={(e) => e.key === "Enter" && addPhaseItem()} placeholder="新增 Phase 名稱" className="min-w-[14rem] flex-1 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] outline-none focus:border-blue-500" maxLength={120} />
+                                                    <input type="color" value={parseHexColor(newPhaseColor, DEFAULT_PHASE_COLOR)} onChange={(e) => setNewPhaseColor(e.target.value)} className="w-10 h-10 rounded border-2 border-slate-200 cursor-pointer bg-transparent shrink-0" title="選擇 Phase 顏色" />
+                                                    <button type="button" onClick={addPhaseItem} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shrink-0">新增</button>
+                                                </div>
+                                            </section>
+                                            <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Phase 清單 / 顏色</h4>
+                                                <ul className="max-h-80 overflow-y-auto custom-scrollbar space-y-1.5 text-[11px] font-bold">
+                                                    {phaseList.map((info) => {
+                                                        const hex = parseHexColor(info.color, DEFAULT_PHASE_COLOR);
+                                                        return (
+                                                            <li key={info.key} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                                                <input type="color" value={hex} onChange={(e) => updatePhaseColor(info.key, e.target.value)} className="w-7 h-7 rounded border border-slate-200 cursor-pointer bg-transparent shrink-0" title="調整顏色" />
+                                                                <span className="inline-block w-2.5 h-2.5 rounded-sm border shrink-0" style={{ backgroundColor: hex, borderColor: 'rgba(15,23,42,0.4)' }}></span>
+                                                                <input value={info.label} onChange={(e) => updatePhaseLabel(info.key, e.target.value)} className="flex-1 min-w-0 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-black text-slate-800 outline-none focus:border-blue-500" maxLength={120} />
+                                                                <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0 hidden sm:inline">{info.key}</span>
+                                                                <button type="button" onClick={() => removePhaseItem(info.key)} disabled={phaseList.length <= 1} className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${phaseList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}>刪除</button>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "site" && (
+                                        <>
+                                            <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                維護<strong>廠區 Site</strong>清單（存於本瀏覽器）。試算表欄位仍為 <code className="bg-slate-100 px-1 rounded">site</code>，資料中已出現的值會自動併入篩選選項。
+                                            </p>
+                                            {labelsTabErr && <p className="text-red-600 text-[10px] font-bold">{labelsTabErr}</p>}
+                                            {labelsTabMsg && <p className="text-emerald-700 text-[10px] font-bold">{labelsTabMsg}</p>}
+                                            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">新增 Site</h4>
                                                 <div className="flex flex-wrap gap-2">
                                                     <input value={newSiteInput} onChange={(e) => { setNewSiteInput(e.target.value); setLabelsTabErr(""); setLabelsTabMsg(""); }} onKeyDown={(e) => e.key === "Enter" && addSiteItem()} placeholder="新增 Site" className="min-w-[12rem] flex-1 px-3 py-2 bg-white border-2 border-slate-200 rounded-xl text-[11px] outline-none focus:border-blue-500" maxLength={120} />
                                                     <button type="button" onClick={addSiteItem} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shrink-0">新增</button>
                                                 </div>
-                                                <ul className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
+                                            </section>
+                                            <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Site 清單</h4>
+                                                <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
                                                     {siteList.map((name) => (
                                                         <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                             <span className="font-mono text-slate-800">{name}</span>
@@ -1261,16 +1515,22 @@
                                                     <div className="col-span-1 font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Task Description</label><input value={phase.task} onChange={e=>setModalData({...modalData, phases: modalData.phases.map(p=>p.localId===phase.localId?{...p, task: e.target.value}:p)})} className="w-full px-2 py-1 text-[11px] border rounded font-black outline-none focus:border-blue-500 font-black font-sans" /></div>
                                                     <div className="col-span-1 font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Phase Type</label>
                                                         <div className="flex flex-wrap gap-1 font-black font-black font-black font-black">
-                                                            {/* Keep full labels and mapped color buttons */}
-                                                            {Object.entries(TYPE_COLORS).map(([key, info]) => (
-                                                                <button 
-                                                                    key={key} 
-                                                                    onClick={() => setModalData({...modalData, phases: modalData.phases.map(p => p.localId === phase.localId ? {...p, type: key} : p)})} 
-                                                                    className={`px-2 py-1 rounded text-[8px] font-black border transition-all font-black font-black font-black ${phase.type === key ? `${info.bg} text-white border-transparent shadow-sm ring-1 ring-slate-400` : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
-                                                                >
-                                                                    {info.label}
-                                                                </button>
-                                                            ))}
+                                                            {phaseList.map((info) => {
+                                                                const isSelected = phase.type === info.key;
+                                                                const selectedStyle = isSelected
+                                                                    ? { backgroundColor: info.color, color: getReadableTextColor(info.color), borderColor: 'transparent' }
+                                                                    : undefined;
+                                                                return (
+                                                                    <button
+                                                                        key={info.key}
+                                                                        onClick={() => setModalData({...modalData, phases: modalData.phases.map(p => p.localId === phase.localId ? {...p, type: info.key} : p)})}
+                                                                        style={selectedStyle}
+                                                                        className={`px-2 py-1 rounded text-[8px] font-black border transition-all font-black font-black font-black ${isSelected ? 'shadow-sm ring-1 ring-slate-400' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                                                    >
+                                                                        {info.label}
+                                                                    </button>
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                     <div className="font-black"><label className="block text-[8px] font-black text-slate-400 uppercase font-black font-black font-black font-black font-black">Start Date</label><input type="date" value={formatDate(phase.start)} onChange={e=>setModalData({...modalData, phases: modalData.phases.map(p=>p.localId===phase.localId?{...p, start: e.target.value}:p)})} className="w-full px-2 py-1 text-[11px] border rounded font-mono outline-none font-black font-sans font-black font-black font-black font-black" /></div>
@@ -1286,7 +1546,7 @@
                                         <button onClick={()=>{
                                             let newTasks = [...tasks];
                                             if(originalProjectName) newTasks = newTasks.filter(t=>formatText(t.project)!==originalProjectName);
-                                            const push = modalData.phases.map(p=>({project: modalData.project, category: modalData.category, pic: modalData.pic, site: modalData.site, task: p.task, type: normalizeTypeKey(p.type), start: p.start, end: p.end}));
+                                            const push = modalData.phases.map(p=>({project: modalData.project, category: modalData.category, pic: modalData.pic, site: modalData.site, task: p.task, type: normalizeTypeKey(p.type, phaseKeys), start: p.start, end: p.end}));
                                             const final = [...newTasks, ...push];
                                             setTasks(final);
                                             handleSaveToCloud(final);
