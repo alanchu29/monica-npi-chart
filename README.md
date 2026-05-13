@@ -63,8 +63,11 @@ python -m http.server 5500
 - **編輯模式密碼**：在 **Settings → Admin** 設定（存於 `localStorage`）；程式內建預設為 `DEFAULT_EDIT_PASSWORD`。
 - **「今日」紅線**：一律依 **台北時區（Asia/Taipei）當日**，無需手動設定日期。
 - **可視日期範圍**：在 **Settings → Display** 設定「今日之前／之後」各顯示幾天（存於 `localStorage`）；內建預設為前 7 天、後 90 天（見 `DEFAULT_VISIBLE_DAYS_BEFORE` / `DEFAULT_VISIBLE_DAYS_AFTER`）。
-- **甘特圖標題**：預設使用 **Google 試算表的檔案名稱**（透過 GAS `?meta=1` 端點取得 `ss.getName()`），所有開啟同一支 GAS 的人都會看到一致的標題。可在 **Settings → Display** 輸入「本機自訂標題」覆蓋（存於 `monica-npi-admin-prefs` 的 `chartTitleOverride`，僅本機生效；按「改用試算表名稱」可清除覆蓋）。內建後備預設為 `DEFAULT_CHART_TITLE`。
-  - GAS 端需在 `doGet(e)` 內加上 `?meta=1` 分支回傳 `{ title: ss.getName() }`；範例見 `.git/App.gs.js`（請複製到自己的 Apps Script 並重新部署 Web App）。
+- **甘特圖標題**：標題就是 **Google 試算表的檔案名稱**（單一來源，不存本機）。
+  - 進站讀取：透過 GAS `?meta=1` 取得 `ss.getName()`，所有開啟同一支 GAS 的人都會看到一致的標題。
+  - 在 **Settings → Display** 修改並按「儲存標題」：前端 POST `{ action: "setTitle", title }`，GAS 端呼叫 `ss.rename(...)` 重新命名整本試算表；其他使用者重新整理後即會同步。
+  - GAS 端需在 `doGet(e)` 加 `?meta=1` 分支、在 `doPost(e)` 加 `setTitle` 分支；範例見 `.git/App.gs.js`。修改後請**重新部署 Web App**；第一次重新命名可能需在 Apps Script 編輯器手動執行一次以完成 Drive 授權。
+  - 取不到試算表名稱時（例如 GAS 尚未部署支援 `?meta=1` 的版本）使用後備預設 `DEFAULT_CHART_TITLE`。
 - **Series / Site 候選清單**：在 **Settings → Series & Site** 管理（存於 `localStorage` 的 `monica-npi-admin-prefs`）；內建預設見 `INITIAL_SERIES_LIST` / `INITIAL_SITE_LIST`。篩選選項會與試算表資料中已出現的 `category` / `site` 合併。**PIC** 候選仍由 `DEFAULT_PICS` 與資料中的 `pic` 合併。
 
 ## 安全與維護建議

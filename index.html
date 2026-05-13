@@ -45,6 +45,14 @@
         }
         .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
 
+        /* Settings modal：整體放大字級（一般 UI 仍維持原大小） */
+        .settings-pane .text-\[9px\]  { font-size: 11px !important; line-height: 1.5 !important; }
+        .settings-pane .text-\[10px\] { font-size: 12.5px !important; line-height: 1.55 !important; }
+        .settings-pane .text-\[11px\] { font-size: 13px !important; line-height: 1.5 !important; }
+        .settings-pane .text-\[12px\] { font-size: 14px !important; }
+        .settings-pane .text-\[13px\] { font-size: 15px !important; }
+        .settings-pane code             { font-size: 0.95em !important; }
+
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans text-[12px]">
@@ -121,8 +129,8 @@
         const DEFAULT_VISIBLE_DAYS_AFTER = 90;
         const DEFAULT_CHART_TITLE = "Monica NPI Project Chart";
 
-        /** 標題 override：允許為空字串（表示「使用試算表名稱」），最多 120 字。 */
-        const normalizeChartTitleOverride = (raw) => {
+        /** 將使用者輸入的標題清理為適合送出的字串（去頭尾空白、單行、最多 120 字）。允許回傳空字串。 */
+        const normalizeChartTitleInput = (raw) => {
             let s = String(raw ?? "").replace(/[\r\n]+/g, " ").trim();
             if (s.length > 120) s = s.slice(0, 120).trim();
             return s;
@@ -160,8 +168,7 @@
                 visibleDaysAfter: DEFAULT_VISIBLE_DAYS_AFTER,
                 resourceCheckEnabled: false,
                 seriesList: [...INITIAL_SERIES_LIST],
-                siteList: [...INITIAL_SITE_LIST],
-                chartTitleOverride: ""
+                siteList: [...INITIAL_SITE_LIST]
             };
             try {
                 const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
@@ -183,26 +190,13 @@
                 if (!seriesList.length) seriesList = [...fallback.seriesList];
                 if (!siteList.length) siteList = [...fallback.siteList];
 
-                // chartTitleOverride：可為空字串（= 使用雲端試算表名稱）。
-                // 兼容舊欄位 chartTitle：若該值存在且非預設標題，視為使用者自訂的 override。
-                let chartTitleOverride = "";
-                if (typeof p.chartTitleOverride === "string") {
-                    chartTitleOverride = normalizeChartTitleOverride(p.chartTitleOverride);
-                } else if (typeof p.chartTitle === "string") {
-                    const legacy = normalizeChartTitleOverride(p.chartTitle);
-                    if (legacy && legacy !== DEFAULT_CHART_TITLE) {
-                        chartTitleOverride = legacy;
-                    }
-                }
-
                 return {
                     editPassword: typeof p.editPassword === "string" && p.editPassword.trim() ? p.editPassword.trim() : fallback.editPassword,
                     visibleDaysBefore: clampInt(p.visibleDaysBefore, fallback.visibleDaysBefore, 0, 730),
                     visibleDaysAfter: clampInt(p.visibleDaysAfter, fallback.visibleDaysAfter, 0, 730),
                     resourceCheckEnabled: p.resourceCheckEnabled === true,
                     seriesList,
-                    siteList,
-                    chartTitleOverride
+                    siteList
                 };
             } catch (e) {
                 return fallback;
@@ -338,7 +332,6 @@
             const [editPassword, setEditPassword] = useState(() => readInitialAdminPrefs().editPassword);
             const [visibleDaysBefore, setVisibleDaysBefore] = useState(() => readInitialAdminPrefs().visibleDaysBefore);
             const [visibleDaysAfter, setVisibleDaysAfter] = useState(() => readInitialAdminPrefs().visibleDaysAfter);
-            const [chartTitleOverride, setChartTitleOverride] = useState(() => readInitialAdminPrefs().chartTitleOverride);
             const [remoteChartTitle, setRemoteChartTitle] = useState("");
 
             const [seriesList, setSeriesList] = useState(() => readInitialAdminPrefs().seriesList);
@@ -363,7 +356,7 @@
             const [adminPassMsg, setAdminPassMsg] = useState("");
             const [visibleDaysBeforeDraft, setVisibleDaysBeforeDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysBefore));
             const [visibleDaysAfterDraft, setVisibleDaysAfterDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysAfter));
-            const [chartTitleDraft, setChartTitleDraft] = useState(() => readInitialAdminPrefs().chartTitleOverride);
+            const [chartTitleDraft, setChartTitleDraft] = useState("");
             const [displaySaveMsg, setDisplaySaveMsg] = useState("");
             const [displaySaveErr, setDisplaySaveErr] = useState("");
 
@@ -387,19 +380,15 @@
                     visibleDaysAfter: overrides.visibleDaysAfter !== undefined ? overrides.visibleDaysAfter : visibleDaysAfter,
                     resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled,
                     seriesList: overrides.seriesList !== undefined ? overrides.seriesList : seriesList,
-                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList,
-                    chartTitleOverride: overrides.chartTitleOverride !== undefined ? overrides.chartTitleOverride : chartTitleOverride
+                    siteList: overrides.siteList !== undefined ? overrides.siteList : siteList
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList, chartTitleOverride]);
+            }, [editPassword, visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, seriesList, siteList]);
 
             const effectiveChartTitle = useMemo(() => {
-                const o = (chartTitleOverride || "").trim();
-                if (o) return o;
                 const r = (remoteChartTitle || "").trim();
-                if (r) return r;
-                return DEFAULT_CHART_TITLE;
-            }, [chartTitleOverride, remoteChartTitle]);
+                return r || DEFAULT_CHART_TITLE;
+            }, [remoteChartTitle]);
 
             const addSeriesItem = useCallback(() => {
                 setLabelsTabErr("");
@@ -570,7 +559,7 @@
                 setHeaderShareLinkToast("");
                 setVisibleDaysBeforeDraft(String(visibleDaysBefore));
                 setVisibleDaysAfterDraft(String(visibleDaysAfter));
-                setChartTitleDraft(chartTitleOverride);
+                setChartTitleDraft(remoteChartTitle);
                 setShowSettingsModal(true);
             };
 
@@ -707,26 +696,32 @@
                 setDisplaySaveMsg("已帶入內建預設（前 7 天、後 90 天），可按儲存套用。");
             };
 
-            const saveChartTitleOverride = () => {
+            const saveChartTitleToSheet = async () => {
                 setDisplaySaveErr("");
                 setDisplaySaveMsg("");
-                const next = normalizeChartTitleOverride(chartTitleDraft);
-                setChartTitleOverride(next);
-                setChartTitleDraft(next);
-                persistAdminSnapshot({ chartTitleOverride: next });
-                if (next) {
-                    setDisplaySaveMsg("自訂標題已儲存（覆蓋試算表名稱，僅本機生效）。");
-                } else {
-                    setDisplaySaveMsg("已清除自訂標題，將自動使用 Google 試算表名稱。");
+                const base = normalizeGasUrl(gasUrl);
+                if (!base) {
+                    setDisplaySaveErr("尚未設定 GAS URL，無法寫入雲端。");
+                    return;
                 }
-            };
-
-            const useRemoteChartTitle = () => {
-                setChartTitleOverride("");
-                setChartTitleDraft("");
-                persistAdminSnapshot({ chartTitleOverride: "" });
-                setDisplaySaveErr("");
-                setDisplaySaveMsg("已切換為使用 Google 試算表名稱。");
+                const next = normalizeChartTitleInput(chartTitleDraft);
+                if (!next) {
+                    setDisplaySaveErr("標題不可為空白。");
+                    return;
+                }
+                try {
+                    await fetch(base, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: JSON.stringify({ action: 'setTitle', title: next })
+                    });
+                    setRemoteChartTitle(next);
+                    setChartTitleDraft(next);
+                    setDisplaySaveMsg("標題已送至 Google 試算表（重新命名整本試算表；其他人重新整理後會看到）。");
+                    setTimeout(() => { fetchChartMeta(); }, 3000);
+                } catch (e) {
+                    setDisplaySaveErr("寫入雲端失敗，請確認 GAS 已部署支援 setTitle 的版本後再試。");
+                }
             };
 
             const refreshRemoteChartTitle = async () => {
@@ -1028,7 +1023,7 @@
 
                     {/* Settings: Admin + Options */}
                     {showSettingsModal && (
-                        <div className="fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
+                        <div className="settings-pane fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
                                 <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center gap-3 shrink-0 bg-slate-50">
                                     <div>
@@ -1055,29 +1050,26 @@
                                             <section className="space-y-3">
                                                 <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">甘特圖標題</h4>
                                                 <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                    主畫面左上角標題預設使用 <strong>Google 試算表的檔案名稱</strong>（透過 GAS <code className="bg-slate-100 px-1 rounded">?meta=1</code> 取得），所有開啟同一支 GAS 的人都會看到相同名字。若要在本機顯示不同名稱，可在下方輸入<strong>本機自訂標題</strong>覆蓋（僅這台瀏覽器生效）。
+                                                    甘特圖標題即是<strong> Google 試算表的檔案名稱</strong>。在這裡修改並按「<strong>儲存標題</strong>」會直接重新命名整本試算表，所有使用同一支 GAS 的人重新整理後都會看到新名稱。
                                                 </p>
                                                 <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50/80 p-3 space-y-1.5">
                                                     <div className="text-[9px] font-black uppercase text-emerald-800 tracking-wider">目前使用中的標題</div>
                                                     <div className="text-[13px] font-black text-emerald-950 break-words leading-tight">{effectiveChartTitle}</div>
-                                                    <div className="text-[9px] text-emerald-800/90 font-bold">
-                                                        來源：{chartTitleOverride.trim()
-                                                            ? "本機自訂"
-                                                            : (remoteChartTitle ? "Google 試算表名稱" : "內建預設")}
-                                                        {remoteChartTitle
-                                                            ? <>（試算表回傳：<span className="font-mono">{remoteChartTitle}</span>）</>
-                                                            : <span className="text-amber-700">（尚未取得試算表名稱 — 請確認 GAS 已部署支援 <code className="bg-white/70 px-1 rounded">?meta=1</code> 的版本）</span>}
-                                                    </div>
+                                                    {remoteChartTitle ? null : (
+                                                        <div className="text-[9px] text-amber-700 font-bold">尚未取得試算表名稱 — 請確認 GAS 已部署支援 <code className="bg-white/70 px-1 rounded">?meta=1</code> 的版本</div>
+                                                    )}
                                                 </div>
                                                 <div className="space-y-1 max-w-xl">
-                                                    <label className="block text-[9px] font-black text-slate-400 uppercase">本機自訂標題（留空 = 使用試算表名稱）</label>
+                                                    <label className="block text-[9px] font-black text-slate-400 uppercase">標題文字（最多 120 字）</label>
                                                     <input type="text" value={chartTitleDraft} onChange={(e) => { setChartTitleDraft(e.target.value); setDisplaySaveErr(""); setDisplaySaveMsg(""); }} maxLength={120} placeholder={remoteChartTitle || DEFAULT_CHART_TITLE} className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[12px] font-black text-slate-800 outline-none focus:border-blue-500" />
                                                 </div>
-                                                <div className="flex flex-wrap gap-2">
-                                                    <button type="button" onClick={saveChartTitleOverride} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">儲存自訂標題</button>
-                                                    <button type="button" onClick={useRemoteChartTitle} disabled={!chartTitleOverride.trim()} className={`px-4 py-2 font-black rounded-xl uppercase text-[10px] ${chartTitleOverride.trim() ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100" : "bg-slate-100 text-slate-300 border border-slate-100 cursor-not-allowed"}`}>改用試算表名稱</button>
+                                                <div className="flex flex-wrap gap-2 items-center">
+                                                    <button type="button" onClick={saveChartTitleToSheet} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px] shadow-md">儲存標題</button>
                                                     <button type="button" onClick={refreshRemoteChartTitle} className="px-4 py-2 bg-blue-50 text-blue-800 border border-blue-200 font-black rounded-xl hover:bg-blue-100 uppercase text-[10px] ml-auto">重新抓取試算表名稱</button>
                                                 </div>
+                                                <p className="text-[9px] text-slate-500 font-bold leading-relaxed">
+                                                    需 GAS 已部署支援 <code className="bg-slate-100 px-0.5 rounded">?meta=1</code>（讀取試算表名稱）與 <code className="bg-slate-100 px-0.5 rounded">{`doPost { action: "setTitle" }`}</code>（寫入）。首次寫入可能需在 Apps Script 編輯器手動執行一次以完成 Drive 授權，然後重新部署 Web App。
+                                                </p>
                                             </section>
                                             <section className="space-y-3">
                                                 <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">可視日期範圍</h4>
