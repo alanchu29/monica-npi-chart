@@ -112,18 +112,9 @@
             return new Date(y, m - 1, d, 12, 0, 0);
         };
 
-        const parseLinesOrCommas = (text) =>
-            String(text || "")
-                .split(/[,，\n\r]+/)
-                .map((s) => s.trim())
-                .filter(Boolean);
-
         const readInitialAdminPrefs = () => {
             const fallback = {
                 editPassword: DEFAULT_EDIT_PASSWORD,
-                defaultCategories: [...DEFAULT_CATEGORIES],
-                defaultSites: [...DEFAULT_SITES],
-                defaultPics: [...DEFAULT_PICS],
                 timelineYmd: null,
                 resourceCheckEnabled: false
             };
@@ -133,9 +124,6 @@
                 const p = JSON.parse(raw);
                 return {
                     editPassword: typeof p.editPassword === "string" && p.editPassword.trim() ? p.editPassword.trim() : fallback.editPassword,
-                    defaultCategories: Array.isArray(p.defaultCategories) && p.defaultCategories.length ? p.defaultCategories.map(String) : fallback.defaultCategories,
-                    defaultSites: Array.isArray(p.defaultSites) && p.defaultSites.length ? p.defaultSites.map(String) : fallback.defaultSites,
-                    defaultPics: Array.isArray(p.defaultPics) && p.defaultPics.length ? p.defaultPics.map(String) : fallback.defaultPics,
                     timelineYmd: typeof p.timelineYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.timelineYmd) ? p.timelineYmd : null,
                     resourceCheckEnabled: p.resourceCheckEnabled === true
                 };
@@ -278,9 +266,6 @@
             const [originalProjectName, setOriginalProjectName] = useState(null);
 
             const [editPassword, setEditPassword] = useState(() => readInitialAdminPrefs().editPassword);
-            const [defaultCategoriesList, setDefaultCategoriesList] = useState(() => readInitialAdminPrefs().defaultCategories);
-            const [defaultSitesList, setDefaultSitesList] = useState(() => readInitialAdminPrefs().defaultSites);
-            const [defaultPicsList, setDefaultPicsList] = useState(() => readInitialAdminPrefs().defaultPics);
             const [timelineAnchor, setTimelineAnchor] = useState(() => {
                 const p = readInitialAdminPrefs();
                 return p.timelineYmd ? dateAtNoonFromYMD(p.timelineYmd) : getTaiwanTodayNoon();
@@ -296,17 +281,14 @@
             const [unlockPassInput, setUnlockPassInput] = useState("");
             const [unlockError, setUnlockError] = useState(false);
             const [adminPassMsg, setAdminPassMsg] = useState("");
-            const [defaultsCatsDraft, setDefaultsCatsDraft] = useState("");
-            const [defaultsSitesDraft, setDefaultsSitesDraft] = useState("");
-            const [defaultsPicsDraft, setDefaultsPicsDraft] = useState("");
             const [timelineDateDraft, setTimelineDateDraft] = useState("");
-            const [optionsSaveMsg, setOptionsSaveMsg] = useState("");
-            const [optionsSaveErr, setOptionsSaveErr] = useState("");
+            const [displaySaveMsg, setDisplaySaveMsg] = useState("");
+            const [displaySaveErr, setDisplaySaveErr] = useState("");
 
             const dynamicOptions = useMemo(() => {
-                const cats = new Set(defaultCategoriesList);
-                const sites = new Set(defaultSitesList);
-                const pics = new Set(defaultPicsList);
+                const cats = new Set(DEFAULT_CATEGORIES);
+                const sites = new Set(DEFAULT_SITES);
+                const pics = new Set(DEFAULT_PICS);
                 tasks.forEach(t => {
                     const c = formatText(t.category).trim(), s = formatText(t.site).trim(), p = formatText(t.pic).trim();
                     if (c) cats.add(c);
@@ -314,19 +296,16 @@
                     if (p) p.split(/[/,，&]/).forEach(n => n.trim() && pics.add(n.trim()));
                 });
                 return { categories: Array.from(cats).sort(), sites: Array.from(sites).sort(), pics: Array.from(pics).sort() };
-            }, [tasks, defaultCategoriesList, defaultSitesList, defaultPicsList]);
+            }, [tasks]);
 
             const persistAdminSnapshot = useCallback((overrides = {}) => {
                 const snap = {
                     editPassword: overrides.editPassword !== undefined ? overrides.editPassword : editPassword,
-                    defaultCategories: overrides.defaultCategories !== undefined ? overrides.defaultCategories : defaultCategoriesList,
-                    defaultSites: overrides.defaultSites !== undefined ? overrides.defaultSites : defaultSitesList,
-                    defaultPics: overrides.defaultPics !== undefined ? overrides.defaultPics : defaultPicsList,
                     timelineYmd: overrides.timelineYmd !== undefined ? overrides.timelineYmd : formatDate(timelineAnchor),
                     resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [editPassword, defaultCategoriesList, defaultSitesList, defaultPicsList, timelineAnchor, isResourceCheckEnabled]);
+            }, [editPassword, timelineAnchor, isResourceCheckEnabled]);
 
             const fetchFromSheets = useCallback(async () => {
                 const base = normalizeGasUrl(gasUrl);
@@ -373,7 +352,9 @@
             useEffect(() => { fetchFromSheets(); }, [fetchFromSheets]);
 
             const openSettingsModal = (tab) => {
-                const t = tab === "options" ? "options" : tab === "gas" ? "gas" : "admin";
+                let t = "admin";
+                if (tab === "display") t = "display";
+                else if (tab === "gas") t = "gas";
                 setSettingsTab(t);
                 setGasUrlDraft(gasUrl || "");
                 setSettingsUrlError("");
@@ -382,11 +363,8 @@
                 setUnlockPassInput("");
                 setUnlockError(false);
                 setAdminPassMsg("");
-                setOptionsSaveMsg("");
-                setOptionsSaveErr("");
-                setDefaultsCatsDraft(defaultCategoriesList.join("\n"));
-                setDefaultsSitesDraft(defaultSitesList.join("\n"));
-                setDefaultsPicsDraft(defaultPicsList.join("\n"));
+                setDisplaySaveMsg("");
+                setDisplaySaveErr("");
                 setTimelineDateDraft(formatDate(timelineAnchor));
                 setShowSettingsModal(true);
             };
@@ -462,45 +440,24 @@
                 }
             };
 
-            const saveDisplayOptions = () => {
-                setOptionsSaveErr("");
-                setOptionsSaveMsg("");
+            const saveTimelineDisplay = () => {
+                setDisplaySaveErr("");
+                setDisplaySaveMsg("");
                 const ymd = String(timelineDateDraft || "").trim();
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
-                    setOptionsSaveErr("Timeline date must be YYYY-MM-DD.");
+                    setDisplaySaveErr("Timeline date must be YYYY-MM-DD.");
                     return;
                 }
-                let cats = parseLinesOrCommas(defaultsCatsDraft);
-                let sites = parseLinesOrCommas(defaultsSitesDraft);
-                let pics = parseLinesOrCommas(defaultsPicsDraft);
-                if (!cats.length) cats = [...DEFAULT_CATEGORIES];
-                if (!sites.length) sites = [...DEFAULT_SITES];
-                if (!pics.length) pics = [...DEFAULT_PICS];
                 const anchor = dateAtNoonFromYMD(ymd);
-                setDefaultCategoriesList(cats);
-                setDefaultSitesList(sites);
-                setDefaultPicsList(pics);
                 setTimelineAnchor(anchor);
-                persistAdminSnapshot({
-                    editPassword,
-                    defaultCategories: cats,
-                    defaultSites: sites,
-                    defaultPics: pics,
-                    timelineYmd: ymd,
-                    resourceCheckEnabled: isResourceCheckEnabled
-                });
-                setOptionsSaveMsg("Display options saved.");
+                persistAdminSnapshot({ timelineYmd: ymd });
+                setDisplaySaveMsg("Timeline display saved.");
             };
 
-            const resetDisplayOptionsToBuiltin = () => {
-                setDefaultsCatsDraft(DEFAULT_CATEGORIES.join("\n"));
-                setDefaultsSitesDraft(DEFAULT_SITES.join("\n"));
-                setDefaultsPicsDraft(DEFAULT_PICS.join("\n"));
+            const resetTimelineDraftBuiltin = () => {
                 setTimelineDateDraft(formatDate(getTaiwanTodayNoon()));
-                setIsResourceCheckEnabled(false);
-                setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: false }), 0);
-                setOptionsSaveErr("");
-                setOptionsSaveMsg("Draft reset to built-in defaults (click Save to apply).");
+                setDisplaySaveErr("");
+                setDisplaySaveMsg("Form set to Taiwan today (click Save to apply).");
             };
 
             const handleFilterToggle = (list, setList, item) => {
@@ -548,7 +505,7 @@
                 const groups = {};
                 dynamicOptions.categories.forEach(c => groups[c] = {});
                 filtered.forEach(t => {
-                    const c = formatText(t.category || (defaultCategoriesList[0] || 'Gen10')), p = formatText(t.project || 'Unknown');
+                    const c = formatText(t.category || (DEFAULT_CATEGORIES[0] || 'Gen10')), p = formatText(t.project || 'Unknown');
                     if (!groups[c]) groups[c] = {};
                     if (!groups[c][p]) groups[c][p] = [];
                     groups[c][p].push(t);
@@ -559,7 +516,7 @@
                     if (ps.length > 0) result.push({ category: c, projects: ps });
                 });
                 return result;
-            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions, defaultCategoriesList]);
+            }, [tasks, selectedCategories, selectedSites, selectedPics, dynamicOptions]);
 
             const resourceOverloadSet = useMemo(() => {
                 const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
@@ -604,9 +561,20 @@
                         <div className="flex gap-2 items-center">
                             <button
                                 type="button"
+                                onClick={() => setIsResourceCheckEnabled((prev) => {
+                                    const next = !prev;
+                                    setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
+                                    return next;
+                                })}
+                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight ${isResourceCheckEnabled ? "bg-red-600 border-red-400 text-white" : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
+                            >
+                                Resource Check: {isResourceCheckEnabled ? "ON" : "OFF"}
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => openSettingsModal("gas")}
                                 className="px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight bg-slate-700 border-slate-600 hover:bg-slate-600 flex items-center gap-1"
-                                title="Settings (cloud URL, admin, display)"
+                                title="Settings: Display, Admin, GAS URL"
                             >
                                 <Icon name="settings" size={14} className="inline" /> Settings
                             </button>
@@ -642,7 +610,7 @@
                     {/* New Project Control */}
                     {isEditMode && (
                         <div className="px-4 py-1.5 bg-white border-b border-gray-200 flex justify-end shrink-0 z-[400]">
-                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: defaultCategoriesList[0] || "Gen10", pic: defaultPicsList[0] || "", site: defaultSitesList[0] || "MX", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
+                            <button onClick={() => { setOriginalProjectName(null); setModalData({ project: "", category: DEFAULT_CATEGORIES[0] || "Gen10", pic: DEFAULT_PICS[0] || "", site: DEFAULT_SITES[0] || "MX", phases: [{ localId: Date.now(), task: "", type: "DevelopmentTNRS", start: formatDate(new Date()), end: formatDate(new Date()) }] }); setShowModal(true); }} className="bg-green-600 text-white px-4 py-1.5 rounded-md flex items-center gap-1 font-black shadow-md hover:bg-green-700 transition-all uppercase tracking-tighter font-sans">
                                 <Icon name="plus" size={14} className="inline mr-1" /> New Project
                             </button>
                         </div>
@@ -779,14 +747,14 @@
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
                                             <Icon name="settings" size={20} className="text-blue-600" /> Settings
                                         </h3>
-                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Options · Admin · GAS URL</p>
+                                        <p className="text-slate-500 text-[10px] mt-0.5 font-bold">Display · Admin · GAS URL</p>
                                     </div>
                                     <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
                                 </div>
                                 <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
-                                    <button type="button" onClick={() => setSettingsTab("options")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "options" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Options</button>
-                                    <button type="button" onClick={() => setSettingsTab("admin")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
-                                    <button type="button" onClick={() => setSettingsTab("gas")} className={`shrink-0 px-4 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
+                                    <button type="button" onClick={() => setSettingsTab("display")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "display" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Display</button>
+                                    <button type="button" onClick={() => setSettingsTab("admin")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
+                                    <button type="button" onClick={() => setSettingsTab("gas")} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
                                 </div>
                                 <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
                                     {settingsTab === "admin" && (
@@ -814,34 +782,20 @@
                                             </section>
                                         </>
                                     )}
-                                    {settingsTab === "options" && (
+                                    {settingsTab === "display" && (
                                         <>
                                             <section className="space-y-3">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Display</h4>
-                                                <label className="block text-[9px] font-black text-slate-400 uppercase">Timeline reference date (&quot;today&quot; line &amp; window)</label>
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Timeline display</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    設定甘特圖<strong>紅色「今日」參考線</strong>對齊哪一天，以及<strong>可見日期範圍</strong>（由此基準日往前約一週、往後約三個月）。不影響試算表內實際資料。
+                                                </p>
+                                                <label className="block text-[9px] font-black text-slate-400 uppercase">Timeline reference date</label>
                                                 <input type="date" value={timelineDateDraft} onChange={(e) => setTimelineDateDraft(e.target.value)} className="px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-[11px] outline-none focus:border-blue-500 font-mono max-w-xs" />
-                                                <div className="flex items-center justify-between gap-4 flex-wrap border border-slate-200 rounded-xl px-3 py-2 bg-slate-50">
-                                                    <span className="text-[10px] font-black text-slate-700 uppercase">Resource check (overload highlight)</span>
-                                                    <button type="button" onClick={() => setIsResourceCheckEnabled((prev) => {
-                                                        const next = !prev;
-                                                        setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
-                                                        return next;
-                                                    })} className={`px-3 py-1 rounded-lg font-black text-[10px] uppercase border ${isResourceCheckEnabled ? "bg-red-600 border-red-500 text-white" : "bg-white border-slate-300 text-slate-600"}`}>{isResourceCheckEnabled ? "On" : "Off"}</button>
-                                                </div>
-                                            </section>
-                                            <section className="space-y-3 pt-2 border-t border-slate-200">
-                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">Default filter chips</h4>
-                                                <p className="text-slate-500 text-[10px] font-bold">One per line or comma-separated. All empty uses built-in lists.</p>
-                                                <div className="grid gap-3 sm:grid-cols-3">
-                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Gen</label><textarea value={defaultsCatsDraft} onChange={(e) => setDefaultsCatsDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
-                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">Site</label><textarea value={defaultsSitesDraft} onChange={(e) => setDefaultsSitesDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
-                                                    <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1">PIC</label><textarea value={defaultsPicsDraft} onChange={(e) => setDefaultsPicsDraft(e.target.value)} rows={5} className="w-full px-2 py-1.5 bg-slate-50 border rounded-lg text-[10px] font-mono outline-none focus:border-blue-500 resize-y" /></div>
-                                                </div>
-                                                {optionsSaveErr && <p className="text-red-600 text-[10px] font-bold">{optionsSaveErr}</p>}
-                                                {optionsSaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{optionsSaveMsg}</p>}
+                                                {displaySaveErr && <p className="text-red-600 text-[10px] font-bold">{displaySaveErr}</p>}
+                                                {displaySaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{displaySaveMsg}</p>}
                                                 <div className="flex flex-wrap gap-2">
-                                                    <button type="button" onClick={saveDisplayOptions} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">Save display options</button>
-                                                    <button type="button" onClick={resetDisplayOptionsToBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">Load built-in into form</button>
+                                                    <button type="button" onClick={saveTimelineDisplay} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">Save timeline</button>
+                                                    <button type="button" onClick={resetTimelineDraftBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">Use Taiwan today in form</button>
                                                 </div>
                                             </section>
                                         </>
