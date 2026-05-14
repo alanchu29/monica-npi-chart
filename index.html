@@ -410,6 +410,18 @@ function sanitizeLabels_(input) {
             '#ddd6fe', '#fbcfe8', '#fed7aa', '#cffafe', '#e9d5ff'
         ];
 
+        // Settings tabs 顏色設定（淡淡的色相區隔，方便辨識）
+        const SETTINGS_TABS = [
+            { id: "display",  label: "Display",         dot: "bg-sky-500",     active: "border-sky-600 text-sky-700 bg-sky-50/70" },
+            { id: "series",   label: "Series",          dot: "bg-indigo-500",  active: "border-indigo-600 text-indigo-700 bg-indigo-50/70" },
+            { id: "phase",    label: "Phase",           dot: "bg-amber-500",   active: "border-amber-600 text-amber-700 bg-amber-50/70" },
+            { id: "site",     label: "Site",            dot: "bg-blue-500",    active: "border-blue-600 text-blue-700 bg-blue-50/70" },
+            { id: "resource", label: "Resource",        dot: "bg-red-500",     active: "border-red-600 text-red-700 bg-red-50/70" },
+            { id: "admin",    label: "Admin",           dot: "bg-slate-500",   active: "border-slate-700 text-slate-800 bg-slate-100/80" },
+            { id: "io",       label: "Import / Export", dot: "bg-emerald-500", active: "border-emerald-600 text-emerald-700 bg-emerald-50/70" },
+            { id: "gas",      label: "GAS URL",         dot: "bg-violet-500",  active: "border-violet-600 text-violet-700 bg-violet-50/70" },
+        ];
+
         const parseHexColor = (raw, fallback = DEFAULT_SERIES_COLOR) => {
             const s = String(raw || '').trim();
             if (/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
@@ -688,6 +700,7 @@ function sanitizeLabels_(input) {
                 "chevron-right": <polyline points="9 18 15 12 9 6" />,
                 "folder-open": <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />,
                 "edit-2": <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />,
+                check: <polyline points="20 6 9 17 4 12" />,
                 "refresh-cw": <g><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></g>,
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
@@ -825,6 +838,8 @@ function sanitizeLabels_(input) {
             const [newSeriesInput, setNewSeriesInput] = useState("");
             const [newSiteInput, setNewSiteInput] = useState("");
             const [newPhaseLabel, setNewPhaseLabel] = useState("");
+            const [seriesNameDrafts, setSeriesNameDrafts] = useState({});
+            const [siteNameDrafts, setSiteNameDrafts] = useState({});
             const [newPhaseColor, setNewPhaseColor] = useState("#94a3b8");
             const [labelsTabErr, setLabelsTabErr] = useState("");
             const [labelsTabMsg, setLabelsTabMsg] = useState("");
@@ -1037,6 +1052,60 @@ function sanitizeLabels_(input) {
                 });
             }, [saveLabelsToSheet]);
 
+            const renameSeriesItem = useCallback((oldName, rawNewName) => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                const newName = String(rawNewName || "").replace(/[\r\n]+/g, ' ').trim();
+                if (!newName) { setLabelsTabErr("Series 名稱不可空白。"); return; }
+                if (newName.length > 120) { setLabelsTabErr("Series 名稱不可超過 120 字元。"); return; }
+                if (newName === oldName) return;
+                if (seriesList.some((n) => n !== oldName && n.toLowerCase() === newName.toLowerCase())) {
+                    setLabelsTabErr("此 Series 名稱已存在。");
+                    return;
+                }
+                const nextSeriesList = seriesList.map((n) => (n === oldName ? newName : n));
+                const nextColors = { ...seriesColors };
+                if (Object.prototype.hasOwnProperty.call(nextColors, oldName)) {
+                    nextColors[newName] = nextColors[oldName];
+                    delete nextColors[oldName];
+                }
+                const affectedCount = tasks.reduce((c, t) => c + (t.category === oldName ? 1 : 0), 0);
+                const nextTasks = affectedCount > 0
+                    ? tasks.map((t) => (t.category === oldName ? { ...t, category: newName } : t))
+                    : tasks;
+
+                setSeriesList(nextSeriesList);
+                setSeriesColors(nextColors);
+                if (affectedCount > 0) setTasks(nextTasks);
+                setSelectedSeries((sel) => sel.map((x) => (x === oldName ? newName : x)));
+                setCollapsedSeries((prev) => {
+                    if (!Object.prototype.hasOwnProperty.call(prev, oldName)) return prev;
+                    const cp = { ...prev };
+                    cp[newName] = cp[oldName];
+                    delete cp[oldName];
+                    return cp;
+                });
+                setModalData((md) => (md.category === oldName ? { ...md, category: newName } : md));
+                setSeriesNameDrafts((prev) => {
+                    if (!Object.prototype.hasOwnProperty.call(prev, oldName)) return prev;
+                    const next = { ...prev };
+                    delete next[oldName];
+                    return next;
+                });
+
+                saveLabelsToSheet({ seriesList: nextSeriesList, seriesColors: nextColors });
+                if (affectedCount > 0) {
+                    const base = normalizeGasUrl(gasUrl);
+                    if (base) {
+                        setSyncStatus('syncing');
+                        fetch(base, { method: 'POST', mode: 'no-cors', body: JSON.stringify(nextTasks) })
+                            .catch(() => setErrorMsg("Failed to sync renamed tasks."));
+                    }
+                }
+
+                setLabelsTabMsg(`已將 Series "${oldName}" 改名為 "${newName}"${affectedCount > 0 ? `，連動更新 ${affectedCount} 筆 task` : ""}（已同步到雲端）。`);
+            }, [seriesList, seriesColors, tasks, gasUrl, saveLabelsToSheet]);
+
             const addPhaseItem = useCallback(() => {
                 setLabelsTabErr("");
                 setLabelsTabMsg("");
@@ -1135,6 +1204,47 @@ function sanitizeLabels_(input) {
                 setModalData((md) => (md.site === name ? { ...md, site: next[0] || "" } : md));
                 setLabelsTabMsg("已刪除 Site（已同步到雲端）。");
             }, [siteList, saveLabelsToSheet]);
+
+            const renameSiteItem = useCallback((oldName, rawNewName) => {
+                setLabelsTabErr("");
+                setLabelsTabMsg("");
+                const newName = String(rawNewName || "").replace(/[\r\n]+/g, ' ').trim();
+                if (!newName) { setLabelsTabErr("Site 名稱不可空白。"); return; }
+                if (newName.length > 120) { setLabelsTabErr("Site 名稱不可超過 120 字元。"); return; }
+                if (newName === oldName) return;
+                if (siteList.some((n) => n !== oldName && n.toLowerCase() === newName.toLowerCase())) {
+                    setLabelsTabErr("此 Site 名稱已存在。");
+                    return;
+                }
+                const nextSiteList = siteList.map((n) => (n === oldName ? newName : n));
+                const affectedCount = tasks.reduce((c, t) => c + (t.site === oldName ? 1 : 0), 0);
+                const nextTasks = affectedCount > 0
+                    ? tasks.map((t) => (t.site === oldName ? { ...t, site: newName } : t))
+                    : tasks;
+
+                setSiteList(nextSiteList);
+                if (affectedCount > 0) setTasks(nextTasks);
+                setSelectedSites((sel) => sel.map((x) => (x === oldName ? newName : x)));
+                setModalData((md) => (md.site === oldName ? { ...md, site: newName } : md));
+                setSiteNameDrafts((prev) => {
+                    if (!Object.prototype.hasOwnProperty.call(prev, oldName)) return prev;
+                    const next = { ...prev };
+                    delete next[oldName];
+                    return next;
+                });
+
+                saveLabelsToSheet({ siteList: nextSiteList });
+                if (affectedCount > 0) {
+                    const base = normalizeGasUrl(gasUrl);
+                    if (base) {
+                        setSyncStatus('syncing');
+                        fetch(base, { method: 'POST', mode: 'no-cors', body: JSON.stringify(nextTasks) })
+                            .catch(() => setErrorMsg("Failed to sync renamed tasks."));
+                    }
+                }
+
+                setLabelsTabMsg(`已將 Site "${oldName}" 改名為 "${newName}"${affectedCount > 0 ? `，連動更新 ${affectedCount} 筆 task` : ""}（已同步到雲端）。`);
+            }, [siteList, tasks, gasUrl, saveLabelsToSheet]);
 
             // --- Resource Check 規則操作（讓 UI 變更後立即同步到雲端） ---
             const updateRuleList = useCallback((nextRules) => {
@@ -2374,14 +2484,20 @@ function sanitizeLabels_(input) {
                                     )}
                                 </div>
                                 <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
-                                    <button type="button" onClick={() => { setSettingsTab("display"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "display" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Display</button>
-                                    <button type="button" onClick={() => { setSettingsTab("series"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "series" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Series</button>
-                                    <button type="button" onClick={() => { setSettingsTab("phase"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "phase" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Phase</button>
-                                    <button type="button" onClick={() => { setSettingsTab("site"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "site" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Site</button>
-                                    <button type="button" onClick={() => { setSettingsTab("resource"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "resource" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Resource</button>
-                                    <button type="button" onClick={() => { setSettingsTab("admin"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
-                                    <button type="button" onClick={() => { setSettingsTab("io"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "io" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Import / Export</button>
-                                    <button type="button" onClick={() => { setSettingsTab("gas"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
+                                    {SETTINGS_TABS.map((tab) => {
+                                        const isActive = settingsTab === tab.id;
+                                        return (
+                                            <button
+                                                key={tab.id}
+                                                type="button"
+                                                onClick={() => { setSettingsTab(tab.id); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all flex items-center gap-1.5 ${isActive ? tab.active : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50/60"}`}
+                                            >
+                                                <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${tab.dot} ${isActive ? "" : "opacity-60"}`}></span>
+                                                {tab.label}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                                 <div className="overflow-y-auto custom-scrollbar p-5 space-y-6 flex-1 min-h-0">
                                     {settingsTab === "display" && (
@@ -2434,7 +2550,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "series" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>專案分類 Series</strong>清單與<strong>顯示顏色</strong>。點選色塊即可調整 Series 標籤顏色。
+                                                維護<strong>專案分類 Series</strong>清單與<strong>顯示顏色</strong>。點選色塊調整顏色；直接編輯名稱欄位後按 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 或 <strong>Rename</strong> 按鈕即可重新命名（會連動更新已使用此名稱的所有 task），<kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 取消。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2453,12 +2569,38 @@ function sanitizeLabels_(input) {
                                                 <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1.5 text-[11px] font-bold">
                                                     {seriesList.map((name) => {
                                                         const hex = parseHexColor((seriesColors || {})[name], DEFAULT_SERIES_COLOR);
+                                                        const draft = seriesNameDrafts[name] !== undefined ? seriesNameDrafts[name] : name;
+                                                        const trimmedDraft = String(draft || "").replace(/[\r\n]+/g, ' ').trim();
+                                                        const isDirty = trimmedDraft !== name;
+                                                        const isDup = isDirty && seriesList.some((n) => n !== name && n.toLowerCase() === trimmedDraft.toLowerCase());
+                                                        const isValid = trimmedDraft.length > 0 && trimmedDraft.length <= 120 && !isDup;
                                                         return (
                                                             <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                                 <div className="flex items-center gap-2 min-w-0 flex-1">
                                                                     <input type="color" value={hex} onChange={(e) => updateSeriesColor(name, e.target.value)} className="w-7 h-7 rounded border border-slate-200 cursor-pointer bg-transparent shrink-0" title="調整顏色" />
-                                                                    <span className="px-2 py-0.5 rounded border text-[10px] font-black truncate" style={seriesTagStyle(name, seriesColors)}>{name}</span>
-                                                                    <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0">{hex}</span>
+                                                                    <span className="inline-block w-2.5 h-2.5 rounded-sm border shrink-0" style={{ backgroundColor: hex, borderColor: 'rgba(15,23,42,0.4)' }}></span>
+                                                                    <input
+                                                                        value={draft}
+                                                                        onChange={(e) => { setSeriesNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') { if (isDirty && isValid) renameSeriesItem(name, draft); }
+                                                                            else if (e.key === 'Escape') { setSeriesNameDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; }); }
+                                                                        }}
+                                                                        className={`flex-1 min-w-0 px-2 py-1 bg-slate-50 border rounded text-[11px] font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-200 focus:border-blue-500"}`}
+                                                                    maxLength={120}
+                                                                    />
+                                                                    {isDirty && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => { if (isValid) renameSeriesItem(name, draft); }}
+                                                                            disabled={!isValid}
+                                                                            title={isValid ? `重新命名 → "${trimmedDraft}"` : (isDup ? "Series 名稱重複" : "名稱不可為空")}
+                                                                            className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${isValid ? "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100" : "text-slate-300 border-slate-100 cursor-not-allowed"}`}
+                                                                        >
+                                                                            <Icon name="check" size={11} /> Rename
+                                                                        </button>
+                                                                    )}
+                                                                    <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0 hidden sm:inline">{hex}</span>
                                                                 </div>
                                                                 <button
                                                                     type="button"
@@ -2486,7 +2628,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "phase" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>。可調整名稱與顏色、新增或刪除。
+                                                維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>。可調整名稱與顏色、新增或刪除；名稱會自動同步存檔，內部識別 key（右側灰字）保持不變以維持資料連結。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2537,7 +2679,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "site" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>廠區 Site</strong>清單。新增、刪除均會即時同步。
+                                                維護<strong>廠區 Site</strong>清單。新增、刪除均會即時同步；直接編輯名稱欄位後按 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 或 <strong>Rename</strong> 按鈕即可重新命名（會連動更新已使用此名稱的所有 task），<kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 取消。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2553,27 +2695,56 @@ function sanitizeLabels_(input) {
                                             <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                                                 <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Site 清單</h4>
                                                 <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
-                                                    {siteList.map((name) => (
-                                                        <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                                                            <span className="font-mono text-slate-800">{name}</span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => askConfirm({
-                                                                    title: "刪除 Site",
-                                                                    body: (
-                                                                        <>
-                                                                            確定要從清單中刪除 Site <strong className="text-slate-900">"{name}"</strong>？
-                                                                            <br />
-                                                                            <span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者；試算表內已使用此 Site 的 task 資料不會被刪除，只是從下拉選單中移除。</span>
-                                                                        </>
-                                                                    ),
-                                                                    onConfirm: () => removeSiteItem(name)
-                                                                })}
-                                                                disabled={siteList.length <= 1}
-                                                                className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
-                                                            >刪除</button>
-                                                        </li>
-                                                    ))}
+                                                    {siteList.map((name) => {
+                                                        const draft = siteNameDrafts[name] !== undefined ? siteNameDrafts[name] : name;
+                                                        const trimmedDraft = String(draft || "").replace(/[\r\n]+/g, ' ').trim();
+                                                        const isDirty = trimmedDraft !== name;
+                                                        const isDup = isDirty && siteList.some((n) => n !== name && n.toLowerCase() === trimmedDraft.toLowerCase());
+                                                        const isValid = trimmedDraft.length > 0 && trimmedDraft.length <= 120 && !isDup;
+                                                        return (
+                                                            <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                                                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                                    <input
+                                                                        value={draft}
+                                                                        onChange={(e) => { setSiteNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') { if (isDirty && isValid) renameSiteItem(name, draft); }
+                                                                            else if (e.key === 'Escape') { setSiteNameDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; }); }
+                                                                        }}
+                                                                        className={`flex-1 min-w-0 px-2 py-1 bg-slate-50 border rounded text-[11px] font-mono font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-200 focus:border-blue-500"}`}
+                                                                        maxLength={120}
+                                                                    />
+                                                                    {isDirty && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => { if (isValid) renameSiteItem(name, draft); }}
+                                                                            disabled={!isValid}
+                                                                            title={isValid ? `重新命名 → "${trimmedDraft}"` : (isDup ? "Site 名稱重複" : "名稱不可為空")}
+                                                                            className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${isValid ? "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100" : "text-slate-300 border-slate-100 cursor-not-allowed"}`}
+                                                                        >
+                                                                            <Icon name="check" size={11} /> Rename
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => askConfirm({
+                                                                        title: "刪除 Site",
+                                                                        body: (
+                                                                            <>
+                                                                                確定要從清單中刪除 Site <strong className="text-slate-900">"{name}"</strong>？
+                                                                                <br />
+                                                                                <span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者；試算表內已使用此 Site 的 task 資料不會被刪除，只是從下拉選單中移除。</span>
+                                                                            </>
+                                                                        ),
+                                                                        onConfirm: () => removeSiteItem(name)
+                                                                    })}
+                                                                    disabled={siteList.length <= 1}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                >刪除</button>
+                                                            </li>
+                                                        );
+                                                    })}
                                                 </ul>
                                             </section>
                                         </>
