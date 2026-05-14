@@ -1982,7 +1982,7 @@ function sanitizeLabels_(input) {
                                 type="button"
                                 onClick={() => requestUnlock("settings")}
                                 disabled={!editPasswordLoaded && !!normalizeGasUrl(gasUrl)}
-                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-800 border-slate-700 text-slate-400 cursor-wait" : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
+                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-800 border-slate-700 text-slate-400 cursor-wait" : "bg-sky-700 border-sky-500 text-white hover:bg-sky-600"}`}
                                 title={editPassword && !isEditMode ? "Settings 需要密碼解鎖" : "Settings: Display, Series & Site, Admin, GAS URL"}
                             >
                                 <Icon name="settings" size={14} className="inline" /> Settings
@@ -1991,65 +1991,63 @@ function sanitizeLabels_(input) {
                         </div>
                     </div>
 
-                    {/* Action bar：Edit Mode + Resource Check（次要操作往下一排） */}
-                    <div className="bg-slate-800 text-white px-4 py-1.5 flex items-center justify-end gap-2 shrink-0 border-b border-slate-700 flex-wrap">
-                        {isEditMode ? (
-                            <button
-                                type="button"
-                                onClick={() => setIsEditMode(false)}
-                                className="px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20 uppercase tracking-tight flex items-center gap-1"
-                                title="退出編輯模式"
-                            >
-                                <Icon name="x" size={12} className="inline" /> Finish editing
-                            </button>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={() => requestUnlock("edit")}
-                                disabled={!editPasswordLoaded && !!normalizeGasUrl(gasUrl)}
-                                className={`px-4 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-700 border-slate-600 text-slate-400 cursor-wait" : "bg-emerald-600 border-emerald-400 text-white hover:bg-emerald-500"}`}
-                                title={editPassword ? "啟用編輯模式（需密碼）" : "啟用編輯模式"}
-                            >
-                                <Icon name={editPassword ? "lock" : "edit-2"} size={12} className="inline" /> Enable edit mode
-                            </button>
-                        )}
-                        {(() => {
-                            const enabledRuleCount = (resourceRules || []).filter((r) => r && r.enabled && Array.isArray(r.phaseKeys) && r.phaseKeys.length > 0).length;
-                            const hasRules = enabledRuleCount > 0;
-                            const tooltip = isResourceCheckEnabled
-                                ? (hasRules
-                                    ? `依 ${enabledRuleCount} 條啟用規則檢查；可到 Settings → Resource 編輯`
-                                    : "目前沒有啟用中的規則。請到 Settings → Resource 新增規則")
-                                : "啟用後，依 Settings → Resource 的規則標出同時段資源衝突";
-                            return (
-                                <button
-                                    type="button"
-                                    onClick={() => setIsResourceCheckEnabled((prev) => {
-                                        const next = !prev;
-                                        setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
-                                        return next;
-                                    })}
-                                    className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1.5 ${isResourceCheckEnabled ? (hasRules ? "bg-red-600 border-red-400 text-white" : "bg-amber-600 border-amber-400 text-white") : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
-                                    title={tooltip}
-                                >
-                                    <Icon name="alert-triangle" size={12} className="inline" />
-                                    Resource Check {isResourceCheckEnabled ? "ON" : "OFF"}
-                                    {isResourceCheckEnabled && (
-                                        <span className={`ml-0.5 px-1.5 py-0.5 rounded text-[9px] ${hasRules ? "bg-red-900/40 text-red-100" : "bg-amber-900/40 text-amber-100"}`}>
-                                            {hasRules ? `${enabledRuleCount} rule${enabledRuleCount > 1 ? 's' : ''}` : "no rules"}
-                                        </span>
-                                    )}
-                                </button>
-                            );
-                        })()}
-                    </div>
-
-                    {/* Filters & Legend */}
+                    {/* Filters & Legend（含次要操作：Edit Mode + Resource Check 右側並列） */}
                     <div className="bg-slate-800 border-b border-slate-700 px-4 py-1.5 space-y-1.5 shrink-0 text-[10px] font-black text-slate-300">
-                        <div className="flex flex-wrap gap-x-6 gap-y-1.5 font-black">
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 font-black">
                             <FilterGroup label="SERIES" options={dynamicOptions.categories} selectedList={selectedSeries} toggleFn={(i)=>handleFilterToggle(selectedSeries, setSelectedSeries, i)} colorClass="text-indigo-400" />
                             <FilterGroup label="SITE" options={dynamicOptions.sites} selectedList={selectedSites} toggleFn={(i)=>handleFilterToggle(selectedSites, setSelectedSites, i)} colorClass="text-blue-400" />
                             <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
+                            <div className="ml-auto flex flex-wrap items-center gap-2">
+                                {isEditMode ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEditMode(false)}
+                                        className="px-3 py-1 rounded font-black text-[11px] transition-all border shadow-md bg-orange-600 border-orange-400 text-white ring-2 ring-orange-500/20 uppercase tracking-tight flex items-center gap-1"
+                                        title="退出編輯模式"
+                                    >
+                                        <Icon name="x" size={12} className="inline" /> Finish editing
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => requestUnlock("edit")}
+                                        disabled={!editPasswordLoaded && !!normalizeGasUrl(gasUrl)}
+                                        className={`px-3 py-1 rounded font-black text-[11px] transition-all border shadow-md uppercase tracking-tight flex items-center gap-1 ${(!editPasswordLoaded && !!normalizeGasUrl(gasUrl)) ? "bg-slate-700 border-slate-600 text-slate-400 cursor-wait" : "bg-emerald-600 border-emerald-400 text-white hover:bg-emerald-500"}`}
+                                        title={editPassword ? "啟用編輯模式（需密碼）" : "啟用編輯模式"}
+                                    >
+                                        <Icon name={editPassword ? "lock" : "edit-2"} size={12} className="inline" /> Enable edit mode
+                                    </button>
+                                )}
+                                {(() => {
+                                    const enabledRuleCount = (resourceRules || []).filter((r) => r && r.enabled && Array.isArray(r.phaseKeys) && r.phaseKeys.length > 0).length;
+                                    const hasRules = enabledRuleCount > 0;
+                                    const tooltip = isResourceCheckEnabled
+                                        ? (hasRules
+                                            ? `依 ${enabledRuleCount} 條啟用規則檢查；可到 Settings → Resource 編輯`
+                                            : "目前沒有啟用中的規則。請到 Settings → Resource 新增規則")
+                                        : "啟用後，依 Settings → Resource 的規則標出同時段資源衝突";
+                                    return (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsResourceCheckEnabled((prev) => {
+                                                const next = !prev;
+                                                setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
+                                                return next;
+                                            })}
+                                            className={`px-3 py-1 rounded font-black text-[11px] transition-all border shadow-md uppercase tracking-tight flex items-center gap-1.5 ${isResourceCheckEnabled ? (hasRules ? "bg-red-600 border-red-400 text-white" : "bg-amber-600 border-amber-400 text-white") : "bg-teal-700 border-teal-500 text-white hover:bg-teal-600"}`}
+                                            title={tooltip}
+                                        >
+                                            <Icon name="alert-triangle" size={12} className="inline" />
+                                            Resource Check {isResourceCheckEnabled ? "ON" : "OFF"}
+                                            {isResourceCheckEnabled && (
+                                                <span className={`ml-0.5 px-1.5 py-0.5 rounded text-[9px] ${hasRules ? "bg-red-900/40 text-red-100" : "bg-amber-900/40 text-amber-100"}`}>
+                                                    {hasRules ? `${enabledRuleCount} rule${enabledRuleCount > 1 ? 's' : ''}` : "no rules"}
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })()}
+                            </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1.5 border-t border-slate-700/30 text-gray-100 font-black uppercase">
                             <span className="uppercase tracking-widest text-amber-400 shrink-0 font-bold text-[10px]">PHASE</span>
