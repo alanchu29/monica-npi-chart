@@ -260,6 +260,44 @@ function sanitizeLabels_(input) {
     });
   }
 
+  if (Array.isArray(input.resourceRules)) {
+    const seenIds = {};
+    out.resourceRules = [];
+    input.resourceRules.forEach(function (r) {
+      if (!r || typeof r !== 'object') return;
+      const id = String(r.id || '').trim();
+      if (!id || id.length > 60 || seenIds[id]) return;
+      const name = String(r.name || '').replace(/[\r\n]+/g, ' ').trim();
+      if (!name || name.length > 120) return;
+      const enabled = r.enabled !== false;
+      const dedupList = function (arr, maxLen) {
+        const out = [];
+        const seen = {};
+        (Array.isArray(arr) ? arr : []).forEach(function (v) {
+          const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
+          if (!s || s.length > maxLen || seen[s]) return;
+          seen[s] = true;
+          out.push(s);
+        });
+        return out;
+      };
+      const seriesScope = dedupList(r.seriesScope, 120);
+      const phaseKeys = dedupList(r.phaseKeys, 60);
+      if (phaseKeys.length === 0) return;
+      const maxNum = Number(r.maxConcurrent);
+      if (!isFinite(maxNum) || maxNum < 0 || maxNum > 999) return;
+      seenIds[id] = true;
+      out.resourceRules.push({
+        id: id,
+        name: name,
+        enabled: enabled,
+        seriesScope: seriesScope,
+        phaseKeys: phaseKeys,
+        maxConcurrent: Math.floor(maxNum)
+      });
+    });
+  }
+
   return out;
 }</script>
 
@@ -467,6 +505,47 @@ function sanitizeLabels_(input) {
             return out;
         };
 
+        // Resource Check 規則：清洗 / 預設
+        const buildResourceRules = (raw) => {
+            if (!Array.isArray(raw)) return [];
+            const seen = new Set();
+            const out = [];
+            raw.forEach((r) => {
+                if (!r || typeof r !== 'object') return;
+                const id = String(r.id || '').trim();
+                if (!id || id.length > 60 || seen.has(id)) return;
+                const name = String(r.name || '').replace(/[\r\n]+/g, ' ').trim();
+                if (!name || name.length > 120) return;
+                const enabled = r.enabled !== false;
+                const dedupList = (arr, maxLen) => {
+                    const set = new Set();
+                    const o = [];
+                    (Array.isArray(arr) ? arr : []).forEach((v) => {
+                        const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
+                        if (!s || s.length > maxLen || set.has(s)) return;
+                        set.add(s);
+                        o.push(s);
+                    });
+                    return o;
+                };
+                const seriesScope = dedupList(r.seriesScope, 120);
+                const phaseKeys = dedupList(r.phaseKeys, 60);
+                if (phaseKeys.length === 0) return;
+                const maxNum = Number(r.maxConcurrent);
+                if (!Number.isFinite(maxNum) || maxNum < 0 || maxNum > 999) return;
+                seen.add(id);
+                out.push({
+                    id,
+                    name,
+                    enabled,
+                    seriesScope,
+                    phaseKeys,
+                    maxConcurrent: Math.floor(maxNum),
+                });
+            });
+            return out;
+        };
+
         // 把任何來源的 labels payload 規範化為可用的 state
         const buildLabelsFromAny = (rawLabels) => {
             const src = rawLabels && typeof rawLabels === 'object' ? rawLabels : {};
@@ -485,7 +564,8 @@ function sanitizeLabels_(input) {
                 seriesList,
                 siteList,
                 seriesColors: buildSeriesColors(src.seriesColors, seriesList),
-                phaseList: buildPhaseList(src.phaseList)
+                phaseList: buildPhaseList(src.phaseList),
+                resourceRules: buildResourceRules(src.resourceRules),
             };
         };
 
@@ -494,6 +574,7 @@ function sanitizeLabels_(input) {
             return Array.isArray(labels.seriesList) && labels.seriesList.length > 0
                 || Array.isArray(labels.phaseList) && labels.phaseList.length > 0
                 || Array.isArray(labels.siteList) && labels.siteList.length > 0
+                || Array.isArray(labels.resourceRules) && labels.resourceRules.length > 0
                 || (labels.seriesColors && Object.keys(labels.seriesColors).length > 0);
         };
 
@@ -611,6 +692,8 @@ function sanitizeLabels_(input) {
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
                 search: <g><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></g>,
+                "alert-triangle": <g><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></g>,
+                trash: <g><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></g>,
                 spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>,
                 link: <g><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></g>,
                 settings: <g><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></g>
@@ -734,6 +817,9 @@ function sanitizeLabels_(input) {
             const [siteList, setSiteList] = useState(() => [...INITIAL_SITE_LIST]);
             const [seriesColors, setSeriesColors] = useState(() => buildSeriesColors(null, INITIAL_SERIES_LIST));
             const [phaseList, setPhaseList] = useState(() => INITIAL_PHASE_LIST.map(p => ({ ...p })));
+            // Resource Check 自訂規則：每個規則指定「在哪些 Series 內、哪些 Phase」、同一天 active project
+            // 數量超過 maxConcurrent 即視為超載；多個規則並行套用，命中任一規則即標記紅色。
+            const [resourceRules, setResourceRules] = useState([]);
             const [labelsLoaded, setLabelsLoaded] = useState(false); // true = 已從 GAS 取得 labels (或確認雲端為空)
             const legacyLabelsRef = useRef(readLegacyLabelData());   // 一次性 migration 用
             const [newSeriesInput, setNewSeriesInput] = useState("");
@@ -862,7 +948,7 @@ function sanitizeLabels_(input) {
                 }
             }, [gasUrl]);
 
-            // 推送 Series / Phase / Site / 顏色 到 GAS DocumentProperties
+            // 推送 Series / Phase / Site / 顏色 / Resource Rules 到 GAS DocumentProperties
             const saveLabelsToSheet = useCallback(async (overrides = {}) => {
                 const base = normalizeGasUrl(gasUrl);
                 if (!base) return false;
@@ -870,7 +956,8 @@ function sanitizeLabels_(input) {
                     seriesList: overrides.seriesList !== undefined ? overrides.seriesList : seriesList,
                     siteList: overrides.siteList !== undefined ? overrides.siteList : siteList,
                     seriesColors: overrides.seriesColors !== undefined ? overrides.seriesColors : seriesColors,
-                    phaseList: overrides.phaseList !== undefined ? overrides.phaseList : phaseList
+                    phaseList: overrides.phaseList !== undefined ? overrides.phaseList : phaseList,
+                    resourceRules: overrides.resourceRules !== undefined ? overrides.resourceRules : resourceRules,
                 };
                 try {
                     await fetch(base, {
@@ -883,7 +970,7 @@ function sanitizeLabels_(input) {
                 } catch (err) {
                     return false;
                 }
-            }, [gasUrl, seriesList, siteList, seriesColors, phaseList]);
+            }, [gasUrl, seriesList, siteList, seriesColors, phaseList, resourceRules]);
 
             const effectiveChartTitle = useMemo(() => {
                 const r = (remoteChartTitle || "").trim();
@@ -1049,6 +1136,52 @@ function sanitizeLabels_(input) {
                 setLabelsTabMsg("已刪除 Site（已同步到雲端）。");
             }, [siteList, saveLabelsToSheet]);
 
+            // --- Resource Check 規則操作（讓 UI 變更後立即同步到雲端） ---
+            const updateRuleList = useCallback((nextRules) => {
+                setResourceRules(nextRules);
+                saveLabelsToSheet({ resourceRules: nextRules });
+            }, [saveLabelsToSheet]);
+
+            const addResourceRule = useCallback(() => {
+                const newRule = {
+                    id: "rule-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
+                    name: "新規則",
+                    enabled: true,
+                    seriesScope: [],
+                    phaseKeys: phaseList[0] ? [phaseList[0].key] : [],
+                    maxConcurrent: 2,
+                };
+                updateRuleList([...resourceRules, newRule]);
+            }, [resourceRules, phaseList, updateRuleList]);
+
+            const updateResourceRule = useCallback((id, patch) => {
+                const next = resourceRules.map((r) => (r.id === id ? { ...r, ...patch } : r));
+                updateRuleList(next);
+            }, [resourceRules, updateRuleList]);
+
+            const removeResourceRule = useCallback((id) => {
+                updateRuleList(resourceRules.filter((r) => r.id !== id));
+            }, [resourceRules, updateRuleList]);
+
+            // 一鍵套用 legacy 規則（DevTNRS + DevPI、所有 series、同時段 > 2）。
+            const addLegacyResourceRule = useCallback(() => {
+                const candidateKeys = phaseList
+                    .map((p) => p.key)
+                    .filter((k) => k === "DevelopmentTNRS" || k === "DevelopmentPI");
+                const fallbackKeys = phaseList.slice(0, 2).map((p) => p.key);
+                const keys = candidateKeys.length > 0 ? candidateKeys : fallbackKeys;
+                if (keys.length === 0) return;
+                const legacyRule = {
+                    id: "rule-legacy-" + Date.now().toString(36),
+                    name: "Dev resource limit (legacy)",
+                    enabled: true,
+                    seriesScope: [],
+                    phaseKeys: keys,
+                    maxConcurrent: 2,
+                };
+                updateRuleList([...resourceRules, legacyRule]);
+            }, [phaseList, resourceRules, updateRuleList]);
+
             const fetchFromSheets = useCallback(async () => {
                 const base = normalizeGasUrl(gasUrl);
                 if (!base) {
@@ -1136,6 +1269,7 @@ function sanitizeLabels_(input) {
                         setSiteList(built.siteList);
                         setSeriesColors(built.seriesColors);
                         setPhaseList(built.phaseList);
+                        setResourceRules(built.resourceRules);
                         setLabelsLoaded(true);
                         // 雲端已有資料 = 確認同步成功，清除本機殘留
                         if (legacyLabelsRef.current) {
@@ -1150,6 +1284,7 @@ function sanitizeLabels_(input) {
                         setSiteList(built.siteList);
                         setSeriesColors(built.seriesColors);
                         setPhaseList(built.phaseList);
+                        setResourceRules(built.resourceRules);
                         try {
                             await fetch(base, {
                                 method: "POST",
@@ -1179,6 +1314,7 @@ function sanitizeLabels_(input) {
                         setSiteList(built.siteList);
                         setSeriesColors(built.seriesColors);
                         setPhaseList(built.phaseList);
+                        setResourceRules(built.resourceRules);
                         setLabelsSyncMsg("無法連線到 GAS metadata，已暫時套用本機備份。請確認 GAS 已部署最新版本（支援 ?meta=1 與 setLabels）。");
                     }
                     if (legacyEditPasswordRef.current) {
@@ -1332,7 +1468,8 @@ function sanitizeLabels_(input) {
                             seriesList,
                             siteList,
                             seriesColors,
-                            phaseList
+                            phaseList,
+                            resourceRules,
                         },
                         tasks: Array.isArray(tasks) ? tasks : []
                     };
@@ -1350,7 +1487,7 @@ function sanitizeLabels_(input) {
                 } catch (err) {
                     setIoExportStatus("匯出失敗：" + (err && err.message ? err.message : String(err)));
                 }
-            }, [effectiveChartTitle, seriesList, siteList, seriesColors, phaseList, tasks]);
+            }, [effectiveChartTitle, seriesList, siteList, seriesColors, phaseList, resourceRules, tasks]);
 
             const resetImportState = () => {
                 setIoImportPayload(null);
@@ -1435,12 +1572,12 @@ function sanitizeLabels_(input) {
 
                     const isMerge = ioImportMode === 'merge';
 
-                    // 2) Labels（Series / Phase / Site / 顏色）
+                    // 2) Labels（Series / Phase / Site / 顏色 / Resource Rules）
                     if (ioImportApplyLabels && data.labels && typeof data.labels === 'object') {
                         const built = buildLabelsFromAny(data.labels);
                         let finalLabels;
                         if (isMerge) {
-                            // 合併模式：聯集 + 既有優先（不覆蓋既有顏色 / phase 設定）
+                            // 合併模式：聯集 + 既有優先（不覆蓋既有顏色 / phase / rule 設定）
                             const mergedSeriesList = [...seriesList];
                             built.seriesList.forEach((s) => { if (!mergedSeriesList.includes(s)) mergedSeriesList.push(s); });
                             const mergedSiteList = [...siteList];
@@ -1449,11 +1586,15 @@ function sanitizeLabels_(input) {
                             const existingPhaseKeys = new Set(phaseList.map((p) => p.key));
                             const mergedPhaseList = [...phaseList];
                             built.phaseList.forEach((p) => { if (!existingPhaseKeys.has(p.key)) mergedPhaseList.push(p); });
+                            const existingRuleIds = new Set(resourceRules.map((r) => r.id));
+                            const mergedRules = [...resourceRules];
+                            built.resourceRules.forEach((r) => { if (!existingRuleIds.has(r.id)) mergedRules.push(r); });
                             finalLabels = {
                                 seriesList: mergedSeriesList,
                                 siteList: mergedSiteList,
                                 seriesColors: mergedSeriesColors,
                                 phaseList: mergedPhaseList,
+                                resourceRules: mergedRules,
                             };
                         } else {
                             finalLabels = built;
@@ -1462,8 +1603,9 @@ function sanitizeLabels_(input) {
                         setSiteList(finalLabels.siteList);
                         setSeriesColors(finalLabels.seriesColors);
                         setPhaseList(finalLabels.phaseList);
+                        setResourceRules(finalLabels.resourceRules);
                         const ok = await saveLabelsToSheet(finalLabels);
-                        summary.push(`labels${isMerge ? "（合併）" : ""}: ${finalLabels.seriesList.length} series / ${finalLabels.phaseList.length} phases / ${finalLabels.siteList.length} sites${ok ? "" : "（寫入失敗）"}`);
+                        summary.push(`labels${isMerge ? "（合併）" : ""}: ${finalLabels.seriesList.length} series / ${finalLabels.phaseList.length} phases / ${finalLabels.siteList.length} sites / ${finalLabels.resourceRules.length} rules${ok ? "" : "（寫入失敗）"}`);
                     }
 
                     // 3) Tasks（覆寫整本試算表 or 合併追加）
@@ -1499,7 +1641,7 @@ function sanitizeLabels_(input) {
                 } finally {
                     setIoImportBusy(false);
                 }
-            }, [ioImportPayload, ioImportApplyTitle, ioImportApplyLabels, ioImportApplyTasks, ioImportMode, gasUrl, saveLabelsToSheet, fetchFromSheets, fetchRemoteMeta, seriesList, siteList, seriesColors, phaseList, tasks]);
+            }, [ioImportPayload, ioImportApplyTitle, ioImportApplyLabels, ioImportApplyTasks, ioImportMode, gasUrl, saveLabelsToSheet, fetchFromSheets, fetchRemoteMeta, seriesList, siteList, seriesColors, phaseList, resourceRules, tasks]);
 
             const testDraftGasUrl = async () => {
                 const normalized = normalizeGasUrl(gasUrlDraft);
@@ -1750,32 +1892,50 @@ function sanitizeLabels_(input) {
                 return result;
             }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList, projectSearch]);
 
-            const resourceOverloadSet = useMemo(() => {
-                const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
-                const overloaded = new Set();
+            // Resource Check：依使用者自訂規則計算超載。回傳 Map：
+            //   key   = `${series}|${dateNum}`
+            //   value = { triggerPhaseKeys: Set<string>, ruleNames: string[], counts: { [phaseKey]: number } }
+            // 命中規則 = 同一天該 series 內，phase 屬於 rule.phaseKeys 的 active project 數 > rule.maxConcurrent。
+            // triggerPhaseKeys：用來判斷單一 cell 是否要畫紅框（只有涉及該規則的 phase 才標紅）。
+            const resourceOverloadMap = useMemo(() => {
+                const map = new Map();
+                const activeRules = (resourceRules || []).filter((r) => r && r.enabled && Array.isArray(r.phaseKeys) && r.phaseKeys.length > 0);
+                if (activeRules.length === 0) return map;
 
-                groupedData.forEach(group => {
-                    days.forEach(day => {
+                groupedData.forEach((group) => {
+                    days.forEach((day) => {
                         if (isHoliday(day)) return;
                         const dateNum = dateToNum(day);
-                        let activeDevProjectCount = 0;
 
-                        group.projects.forEach(([, phases]) => {
-                            const hasActiveDevPhase = phases.some(phase => {
-                                const phaseType = normalizeTypeKey(phase.type, phaseKeys);
-                                return trackedTypes.has(phaseType) && dateNum >= strToNum(phase.start) && dateNum <= strToNum(phase.end);
+                        activeRules.forEach((rule) => {
+                            if (Array.isArray(rule.seriesScope) && rule.seriesScope.length > 0 && !rule.seriesScope.includes(group.category)) return;
+                            const watchSet = new Set(rule.phaseKeys);
+
+                            let count = 0;
+                            group.projects.forEach(([, phases]) => {
+                                const hit = phases.some((phase) => {
+                                    const phaseType = normalizeTypeKey(phase.type, phaseKeys);
+                                    return watchSet.has(phaseType)
+                                        && dateNum >= strToNum(phase.start)
+                                        && dateNum <= strToNum(phase.end);
+                                });
+                                if (hit) count += 1;
                             });
-                            if (hasActiveDevPhase) activeDevProjectCount += 1;
-                        });
 
-                        if (activeDevProjectCount > 2) {
-                            overloaded.add(`${group.category}|${dateNum}`);
-                        }
+                            if (count > rule.maxConcurrent) {
+                                const key = `${group.category}|${dateNum}`;
+                                const entry = map.get(key) || { triggerPhaseKeys: new Set(), ruleNames: [], rules: [] };
+                                rule.phaseKeys.forEach((k) => entry.triggerPhaseKeys.add(k));
+                                entry.ruleNames.push(rule.name);
+                                entry.rules.push({ name: rule.name, max: rule.maxConcurrent, count });
+                                map.set(key, entry);
+                            }
+                        });
                     });
                 });
 
-                return overloaded;
-            }, [groupedData, days, phaseKeys]);
+                return map;
+            }, [groupedData, days, phaseKeys, resourceRules]);
 
             return (
                 <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
@@ -1802,17 +1962,35 @@ function sanitizeLabels_(input) {
                             </div>
                         </div>
                         <div className="flex gap-2 items-center flex-wrap justify-end max-w-[min(100%,42rem)]">
-                            <button
-                                type="button"
-                                onClick={() => setIsResourceCheckEnabled((prev) => {
-                                    const next = !prev;
-                                    setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
-                                    return next;
-                                })}
-                                className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight ${isResourceCheckEnabled ? "bg-red-600 border-red-400 text-white" : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
-                            >
-                                Resource Check: {isResourceCheckEnabled ? "ON" : "OFF"}
-                            </button>
+                            {(() => {
+                                const enabledRuleCount = (resourceRules || []).filter((r) => r && r.enabled && Array.isArray(r.phaseKeys) && r.phaseKeys.length > 0).length;
+                                const hasRules = enabledRuleCount > 0;
+                                const tooltip = isResourceCheckEnabled
+                                    ? (hasRules
+                                        ? `依 ${enabledRuleCount} 條啟用規則檢查；可到 Settings → Resource 編輯`
+                                        : "目前沒有啟用中的規則。請到 Settings → Resource 新增規則")
+                                    : "啟用後，依 Settings → Resource 的規則標出同時段資源衝突";
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsResourceCheckEnabled((prev) => {
+                                            const next = !prev;
+                                            setTimeout(() => persistAdminSnapshot({ resourceCheckEnabled: next }), 0);
+                                            return next;
+                                        })}
+                                        className={`px-3 py-1.5 rounded font-black text-[11px] transition-all border shadow-lg uppercase tracking-tight flex items-center gap-1.5 ${isResourceCheckEnabled ? (hasRules ? "bg-red-600 border-red-400 text-white" : "bg-amber-600 border-amber-400 text-white") : "bg-slate-700 border-slate-600 hover:bg-slate-600"}`}
+                                        title={tooltip}
+                                    >
+                                        <Icon name="alert-triangle" size={12} className="inline" />
+                                        Resource Check {isResourceCheckEnabled ? "ON" : "OFF"}
+                                        {isResourceCheckEnabled && (
+                                            <span className={`ml-0.5 px-1.5 py-0.5 rounded text-[9px] ${hasRules ? "bg-red-900/40 text-red-100" : "bg-amber-900/40 text-amber-100"}`}>
+                                                {hasRules ? `${enabledRuleCount} rule${enabledRuleCount > 1 ? 's' : ''}` : "no rules"}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })()}
                             <button
                                 type="button"
                                 onClick={() => copyShareableChartUrl("header")}
@@ -1976,11 +2154,13 @@ function sanitizeLabels_(input) {
                                             {!isCollapsed && group.projects.map(([projName, phases], projIdx) => {
                                                 const projectHasResourceRisk = isResourceCheckEnabled && days.some(day => {
                                                     const dateNum = dateToNum(day);
-                                                    if (!resourceOverloadSet.has(`${group.category}|${dateNum}`)) return false;
+                                                    const overload = resourceOverloadMap.get(`${group.category}|${dateNum}`);
+                                                    if (!overload) return false;
                                                     return phases.some(phase => {
                                                         const phaseType = normalizeTypeKey(phase.type, phaseKeys);
-                                                        const isDevType = phaseType === "DevelopmentTNRS" || phaseType === "DevelopmentPI";
-                                                        return isDevType && dateNum >= strToNum(phase.start) && dateNum <= strToNum(phase.end);
+                                                        return overload.triggerPhaseKeys.has(phaseType)
+                                                            && dateNum >= strToNum(phase.start)
+                                                            && dateNum <= strToNum(phase.end);
                                                     });
                                                 });
 
@@ -2013,10 +2193,11 @@ function sanitizeLabels_(input) {
                                                         const typeKey = active ? normalizeTypeKey(active.type, phaseKeys) : "";
                                                         const phaseInfo = getPhaseInfo(phaseList, typeKey);
                                                         const phaseColor = phaseInfo.color || DEFAULT_PHASE_COLOR;
+                                                        const overloadEntry = resourceOverloadMap.get(`${group.category}|${dateNum}`);
                                                         const isResourceOverloaded = isResourceCheckEnabled &&
                                                             active &&
-                                                            (typeKey === "DevelopmentTNRS" || typeKey === "DevelopmentPI") &&
-                                                            resourceOverloadSet.has(`${group.category}|${dateNum}`);
+                                                            !!overloadEntry &&
+                                                            overloadEntry.triggerPhaseKeys.has(typeKey);
 
                                                         return (
                                                             <td key={i} className={`w-8 h-9 border-r border-gray-100 relative ${holiday ? 'bg-slate-200/50' : ''} ${isToday ? 'bg-red-100/30' : ''}`}>
@@ -2034,6 +2215,16 @@ function sanitizeLabels_(input) {
                                                                             </div>
                                                                             <p className="opacity-100 font-semibold mb-1 break-words leading-relaxed font-black font-sans">{formatText(active.task)}</p>
                                                                             <p className="pt-1 border-t border-slate-800 text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate">{projName}</p>
+                                                                            {isResourceOverloaded && Array.isArray(overloadEntry?.rules) && overloadEntry.rules.length > 0 && (
+                                                                                <div className="mt-1 pt-1 border-t border-red-900/60 space-y-0.5">
+                                                                                    <p className="text-[9px] text-red-400 font-black uppercase tracking-wider">⚠ Resource Overload</p>
+                                                                                    {overloadEntry.rules.map((r, idx) => (
+                                                                                        <p key={idx} className="text-[9px] text-red-300 font-bold leading-snug break-words">
+                                                                                            {r.name} — 同時段 <span className="font-black text-white">{r.count}</span> &gt; <span className="font-black">{r.max}</span>
+                                                                                        </p>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 )}
@@ -2180,6 +2371,7 @@ function sanitizeLabels_(input) {
                                     <button type="button" onClick={() => { setSettingsTab("series"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "series" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Series</button>
                                     <button type="button" onClick={() => { setSettingsTab("phase"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "phase" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Phase</button>
                                     <button type="button" onClick={() => { setSettingsTab("site"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "site" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Site</button>
+                                    <button type="button" onClick={() => { setSettingsTab("resource"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "resource" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Resource</button>
                                     <button type="button" onClick={() => { setSettingsTab("admin"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "admin" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Admin</button>
                                     <button type="button" onClick={() => { setSettingsTab("io"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "io" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Import / Export</button>
                                     <button type="button" onClick={() => { setSettingsTab("gas"); setLabelsTabErr(""); setLabelsTabMsg(""); }} className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${settingsTab === "gas" ? "border-blue-600 text-blue-700 bg-blue-50/50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>GAS URL</button>
@@ -2378,6 +2570,171 @@ function sanitizeLabels_(input) {
                                                             >刪除</button>
                                                         </li>
                                                     ))}
+                                                </ul>
+                                            </section>
+                                        </>
+                                    )}
+                                    {settingsTab === "resource" && (
+                                        <>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-2 border-b border-slate-100 pb-2"><Icon name="alert-triangle" size={16} /> Resource Check Rules</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    <strong>規則式資源衝突偵測</strong>：每條規則定義「在哪些 Series 內、哪些 Phase 同時段累計超過多少個 project」就視為超載。
+                                                    命中的 cell 會被紅框圈起、該 project 整列會變紅。<strong>Header 上的 Resource Check 按鈕需保持 ON，規則才會生效。</strong>
+                                                </p>
+                                                <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                                                    規則同步存於 Google 試算表（GAS DocumentProperties），所有使用同一支 Web App 的人共用一份。
+                                                </p>
+
+                                                <div className="flex flex-wrap gap-2 pt-1">
+                                                    <button type="button" onClick={addResourceRule} className="px-3 py-1.5 bg-emerald-600 text-white font-black rounded-lg hover:bg-emerald-500 uppercase text-[10px] flex items-center gap-1">
+                                                        <Icon name="plus" size={12} /> 新增規則
+                                                    </button>
+                                                    {resourceRules.length === 0 && phaseList.length >= 1 && (
+                                                        <button type="button" onClick={addLegacyResourceRule} className="px-3 py-1.5 bg-slate-100 text-slate-700 border border-slate-300 font-black rounded-lg hover:bg-slate-200 uppercase text-[10px]">
+                                                            套用預設 (Dev TNRS / PI · max 2)
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                {resourceRules.length === 0 && (
+                                                    <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center space-y-1">
+                                                        <p className="text-[11px] font-black text-slate-600">尚未定義任何規則</p>
+                                                        <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                                                            按「+ 新增規則」開始，或按「套用預設」一鍵建立等同舊版的規則
+                                                            （Dev TNRS + Dev PI，所有 Series，同時段 &gt; 2 即告警）。
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                <ul className="space-y-3">
+                                                    {resourceRules.map((rule) => {
+                                                        const ruleSeriesScope = Array.isArray(rule.seriesScope) ? rule.seriesScope : [];
+                                                        const rulePhaseKeys = Array.isArray(rule.phaseKeys) ? rule.phaseKeys : [];
+                                                        const togglePhaseKey = (key) => {
+                                                            const has = rulePhaseKeys.includes(key);
+                                                            const next = has ? rulePhaseKeys.filter((k) => k !== key) : [...rulePhaseKeys, key];
+                                                            updateResourceRule(rule.id, { phaseKeys: next });
+                                                        };
+                                                        const toggleSeriesScope = (name) => {
+                                                            if (name === "__all__") {
+                                                                updateResourceRule(rule.id, { seriesScope: [] });
+                                                                return;
+                                                            }
+                                                            const has = ruleSeriesScope.includes(name);
+                                                            const next = has ? ruleSeriesScope.filter((s) => s !== name) : [...ruleSeriesScope, name];
+                                                            updateResourceRule(rule.id, { seriesScope: next });
+                                                        };
+                                                        const isAllSeries = ruleSeriesScope.length === 0;
+                                                        return (
+                                                            <li key={rule.id} className={`rounded-xl border-2 p-3 space-y-3 transition ${rule.enabled ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-slate-50/60 opacity-75"}`}>
+                                                                <div className="flex items-start gap-2 flex-wrap">
+                                                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={rule.enabled}
+                                                                            onChange={(e) => updateResourceRule(rule.id, { enabled: e.target.checked })}
+                                                                            className="w-3.5 h-3.5"
+                                                                        />
+                                                                        <span className="text-[9px] font-black uppercase text-slate-600 tracking-widest">啟用</span>
+                                                                    </label>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={rule.name}
+                                                                        onChange={(e) => updateResourceRule(rule.id, { name: e.target.value })}
+                                                                        placeholder="規則名稱（顯示在 cell tooltip）"
+                                                                        maxLength={120}
+                                                                        className="flex-1 min-w-[12rem] px-2 py-1 bg-white border border-slate-300 rounded text-[11px] font-black text-slate-800 outline-none focus:border-blue-500"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => askConfirm({
+                                                                            title: "刪除規則",
+                                                                            body: (<>確定要刪除規則 <strong className="text-slate-900">"{rule.name}"</strong>？<br /><span className="text-[10px] text-slate-500 font-bold">此操作會同步到雲端、影響其他使用者。</span></>),
+                                                                            onConfirm: () => removeResourceRule(rule.id)
+                                                                        })}
+                                                                        className="px-2 py-1 text-[10px] font-black uppercase text-red-600 border border-red-200 rounded hover:bg-red-50"
+                                                                        title="刪除此規則"
+                                                                    >刪除</button>
+                                                                </div>
+
+                                                                {/* 適用 Series */}
+                                                                <div className="space-y-1.5">
+                                                                    <div className="text-[9px] font-black uppercase text-slate-500 tracking-wider">適用 Series（不選代表「所有 Series」）</div>
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => toggleSeriesScope("__all__")}
+                                                                            className={`px-2 py-0.5 text-[10px] font-black rounded border ${isAllSeries ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"}`}
+                                                                        >All</button>
+                                                                        {seriesList.length === 0 && (
+                                                                            <span className="text-[9px] text-slate-400 font-bold italic px-1">沒有任何 Series（請到 Series 分頁新增）</span>
+                                                                        )}
+                                                                        {seriesList.map((s) => {
+                                                                            const selected = ruleSeriesScope.includes(s);
+                                                                            return (
+                                                                                <button
+                                                                                    key={s}
+                                                                                    type="button"
+                                                                                    onClick={() => toggleSeriesScope(s)}
+                                                                                    className={`px-2 py-0.5 text-[10px] font-black rounded border ${selected ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"}`}
+                                                                                >{s}</button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* 被監控的 Phase */}
+                                                                <div className="space-y-1.5">
+                                                                    <div className="text-[9px] font-black uppercase text-slate-500 tracking-wider">被監控的 Phase（至少選一個）</div>
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {phaseList.length === 0 && (
+                                                                            <span className="text-[9px] text-slate-400 font-bold italic px-1">沒有任何 Phase（請到 Phase 分頁新增）</span>
+                                                                        )}
+                                                                        {phaseList.map((p) => {
+                                                                            const selected = rulePhaseKeys.includes(p.key);
+                                                                            return (
+                                                                                <button
+                                                                                    key={p.key}
+                                                                                    type="button"
+                                                                                    onClick={() => togglePhaseKey(p.key)}
+                                                                                    className={`px-2 py-0.5 text-[10px] font-black rounded border inline-flex items-center gap-1 ${selected ? "text-white border-transparent shadow-sm" : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"}`}
+                                                                                    style={selected ? { backgroundColor: p.color } : undefined}
+                                                                                    title={p.key}
+                                                                                >
+                                                                                    {!selected && <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: p.color }}></span>}
+                                                                                    {p.label}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                    {rulePhaseKeys.length === 0 && (
+                                                                        <p className="text-[9px] text-red-600 font-bold">至少要選一個 Phase，否則此規則會被忽略不檢查。</p>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* 門檻數量 */}
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">同時段超過</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        max={999}
+                                                                        value={rule.maxConcurrent}
+                                                                        onChange={(e) => {
+                                                                            const n = parseInt(e.target.value, 10);
+                                                                            if (Number.isFinite(n) && n >= 0 && n <= 999) {
+                                                                                updateResourceRule(rule.id, { maxConcurrent: n });
+                                                                            }
+                                                                        }}
+                                                                        className="w-16 px-2 py-1 bg-white border border-slate-300 rounded text-[12px] font-black text-slate-800 outline-none focus:border-blue-500 text-center"
+                                                                    />
+                                                                    <span className="text-[10px] text-slate-700 font-bold">個 project 即告警</span>
+                                                                    <span className="text-[9px] text-slate-500 font-bold italic">（{`> ${rule.maxConcurrent}` } = overload）</span>
+                                                                </div>
+                                                            </li>
+                                                        );
+                                                    })}
                                                 </ul>
                                             </section>
                                         </>

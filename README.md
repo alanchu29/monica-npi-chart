@@ -394,7 +394,12 @@ function sanitizeLabels_(input) {
 - **Series / Phase / Site / 顏色**：雲端共用，存於 GAS `DocumentProperties.labels`（JSON 字串）。在 UI 任何修改都會即時 POST `{ action: "setLabels", labels }`，其他人重新整理即可同步看到。
 - **可視日期範圍**：個人偏好，存於 `localStorage`，每人不同。預設前 7 天、後 90 天。
 - **「今日」紅線**：永遠依台北時區（Asia/Taipei）當日，不需手動設。
-- **Resource Check**：仰賴 phase key 等於 `DevelopmentTNRS` 與 `DevelopmentPI` 的兩個階段；只在這兩個 key 同時存在於 `Settings → Phase` 時才會觸發超載偵測。新使用者預設沒有這兩個 key（清單為空），要啟用此功能，請在新增 Phase 時把名稱**直接打成** `DevelopmentTNRS` 與 `DevelopmentPI`（因為內部 key 由名稱自動產生，這兩個 label 本身就是純英數，會剛好得到相同的 key）。也可以新增之後再重新命名 label，內部 key 仍維持當初建立時的值。
+- **Resource Check**：採**規則式 (rule-based) 設計**，每條規則同步存於 GAS `DocumentProperties.labels.resourceRules`，所有使用同一支 Web App 的人共用一份。
+  - **資料結構**：`{ id, name, enabled, seriesScope: string[], phaseKeys: string[], maxConcurrent: number }`。`seriesScope` 為空 = 套用到所有 Series；否則只比對命名清單。`phaseKeys` 至少要有一個，否則整條規則會被忽略不檢查。
+  - **觸發邏輯**：對每個 Series、每天（排除假日）數出「有任何 active phase 屬於 `rule.phaseKeys`」的 project 數，**> `rule.maxConcurrent`** 就視為超載；多條規則並行套用，命中任一條即標紅。Cell tooltip 會列出命中的規則名稱、count vs max。
+  - **建立 / 編輯 / 刪除**：Settings → Resource。每條規則內可用 chip 多選 Series 與 Phase，數字輸入框設門檻。所有變更立即同步雲端。
+  - **Header 按鈕**：總開關。ON 且至少一條規則啟用 → 紅色 + `N rules` 計數；ON 但無規則 → 琥珀色 + `no rules` 提示；OFF → 灰色。Tooltip 會說明當下狀態。
+  - **舊版相容**：舊版內建「Dev TNRS + Dev PI、所有 Series、同時段 > 2」是寫死的邏輯；新版預設無規則，需明確新增。Settings → Resource 在規則為空時會顯示「套用預設」按鈕，一鍵建立與舊版等同的規則。
 
 ---
 
@@ -419,7 +424,11 @@ function sanitizeLabels_(input) {
     "seriesList":   ["ProductA", "Gen11"],
     "siteList":     ["MX", "LZ", "MY", "CZ", "TN"],
     "seriesColors": { "ProductA": "#bfdbfe", "Gen11": "#fecaca" },
-    "phaseList":    [ { "key": "Design", "label": "Design", "color": "#facc15" }, ... ]
+    "phaseList":    [ { "key": "Design", "label": "Design", "color": "#facc15" }, ... ],
+    "resourceRules": [
+      { "id": "rule-xxxx", "name": "Dev resource limit", "enabled": true,
+        "seriesScope": [], "phaseKeys": ["DevelopmentTNRS", "DevelopmentPI"], "maxConcurrent": 2 }
+    ]
   },
   "tasks": [
     { "project": "...", "category": "...", "task": "...", "type": "...", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "pic": "...", "site": "..." },
@@ -428,7 +437,7 @@ function sanitizeLabels_(input) {
 }
 ```
 
-> 為了安全，**編輯密碼不會被匯出**；個人偏好（可視天數、Resource Check）也不在內，因為它們只屬於目前這顆瀏覽器。
+> 為了安全，**編輯密碼不會被匯出**；個人偏好（可視天數、Resource Check 開關狀態）也不在內，因為它們只屬於目前這顆瀏覽器。Resource Check 的**規則本身**屬於雲端共用設定，會被一起匯出 / 匯入。
 
 ### 匯入
 
