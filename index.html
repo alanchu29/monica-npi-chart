@@ -2485,7 +2485,10 @@ function sanitizeLabels_(input) {
                                     {normalizeGasUrl(gasUrl) ? (
                                         <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
                                     ) : (
-                                        <span className="text-[10px] text-amber-700 font-black text-right leading-tight whitespace-nowrap">請先於「GAS URL」分頁依指引貼上你自己的網址並儲存後再關閉。</span>
+                                        <span className="text-[10px] font-black leading-tight whitespace-nowrap inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-100 text-amber-900 border-2 border-amber-400 shadow-sm ring-2 ring-amber-200 animate-pulse">
+                                            <Icon name="alert-triangle" size={12} className="inline shrink-0" />
+                                            請先於「<strong className="underline decoration-amber-600 decoration-2">GAS URL</strong>」分頁依指引貼上你自己的網址並儲存後再關閉。
+                                        </span>
                                     )}
                                 </div>
                                 <div className="flex flex-wrap border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5">
@@ -3442,7 +3445,7 @@ function sanitizeLabels_(input) {
                                                             <div className="space-y-1.5 flex-1">
                                                                 <div className="text-[12px] font-black text-orange-800 uppercase tracking-wide">A little thank-you</div>
                                                                 <p className="text-[11px] text-orange-900 font-bold leading-relaxed">
-                                                                    如果覺得這個系統模板好用，<strong className="bg-gradient-to-r from-rose-200 to-amber-200 px-1 rounded">請記得請 Dixon 一杯飲料</strong> <span className="font-mono text-rose-600">:)</span>
+                                                                    如果覺得這個系統模板好用，<strong className="bg-gradient-to-r from-rose-200 to-amber-200 px-1 rounded">記得請 Dixon Chu 一杯飲料</strong> <span className="font-mono text-rose-600">:)</span>
                                                                 </p>
                                                             </div>
                                                         </div>
