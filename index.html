@@ -1785,15 +1785,18 @@ function sanitizeLabels_(input) {
                             <div className={`p-1.5 rounded-md ${syncStatus === 'synced' ? 'bg-green-600' : 'bg-orange-500 animate-pulse'}`}>
                                 <Icon name="database" size={16} />
                             </div>
-                            <div className="flex items-baseline gap-2 text-left font-black min-w-0 flex-1 mr-2">
+                            <div className="flex items-baseline gap-3 text-left font-black min-w-0 flex-1 mr-2">
                                 {(chartTitleLoaded || !normalizeGasUrl(gasUrl)) ? (
-                                    <h1 className="text-base font-black tracking-tighter uppercase underline decoration-green-500 underline-offset-4 truncate" title={effectiveChartTitle}>{effectiveChartTitle}</h1>
+                                    <h1 className="text-lg font-black tracking-tighter uppercase underline decoration-green-500 decoration-2 underline-offset-4 truncate" title={effectiveChartTitle}>{effectiveChartTitle}</h1>
                                 ) : (
-                                    <h1 className="text-base font-black tracking-tighter truncate flex items-center" aria-label="Loading chart title…">
+                                    <h1 className="text-lg font-black tracking-tighter truncate flex items-center" aria-label="Loading chart title…">
                                         <span className="inline-block h-4 w-48 rounded bg-slate-700/70 animate-pulse"></span>
                                     </h1>
                                 )}
-                                <span className="text-[10px] text-slate-400 font-black italic tracking-widest">@Dixon Chu</span>
+                                <div className="flex items-baseline gap-1.5 shrink-0">
+                                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Designed by</span>
+                                    <span className="text-[12px] font-black uppercase tracking-wide bg-gradient-to-r from-emerald-300 via-emerald-200 to-sky-300 bg-clip-text text-transparent">Dixon Chu</span>
+                                </div>
                             </div>
                         </div>
                         <div className="flex gap-2 items-center flex-wrap justify-end max-w-[min(100%,42rem)]">
@@ -2066,7 +2069,10 @@ function sanitizeLabels_(input) {
                              <Icon name="spreadsheet" size={12} className="inline" /> 
                              <span>Cloud Storage Active</span>
                         </div>
-                        <span className="text-slate-300 font-black italic">Persistent Matrix Link</span>
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Designed &amp; built by</span>
+                            <span className="text-[11px] font-black text-slate-800 uppercase tracking-wide">Dixon Chu</span>
+                        </div>
                     </div>
 
                     {/* Settings: Admin + Options */}
@@ -2818,9 +2824,17 @@ function sanitizeLabels_(input) {
                                                     <button type="button" onClick={applyGasUrlFromSettings} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 transition-all uppercase text-[10px]">儲存並連線</button>
                                                     <button type="button" onClick={testDraftGasUrl} className="px-4 py-2 bg-blue-50 text-blue-800 border border-blue-200 font-black rounded-xl hover:bg-blue-100 uppercase text-[10px]">測試網址</button>
                                                 </div>
-                                            </section>
+                                                </section>
                                         </>
                                     )}
+                                </div>
+                                {/* Settings modal footer — 設計者署名 */}
+                                <div className="shrink-0 border-t border-slate-200 px-5 py-2.5 bg-slate-50 flex items-center justify-between gap-3">
+                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Monica NPI Chart</span>
+                                    <div className="flex items-baseline gap-1.5">
+                                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Designed &amp; built by</span>
+                                        <span className="text-[11px] font-black uppercase tracking-wide bg-gradient-to-r from-emerald-600 via-emerald-500 to-sky-600 bg-clip-text text-transparent">Dixon Chu</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
