@@ -45,20 +45,20 @@
         }
         .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
 
-        /* 主 UI：整體字級微幅放大（settings modal 另有更大放大規則覆蓋下方） */
-        body .text-\[9px\]  { font-size: 10.5px !important; line-height: 1.5 !important; }
-        body .text-\[10px\] { font-size: 11.5px !important; line-height: 1.55 !important; }
-        body .text-\[11px\] { font-size: 12.5px !important; line-height: 1.5 !important; }
-        body .text-\[12px\] { font-size: 13.5px !important; line-height: 1.5 !important; }
-        body .text-\[13px\] { font-size: 14.5px !important; }
-        body .text-\[14px\] { font-size: 15px !important; }
+        /* 主 UI：整體字級放大（settings modal 另有更大放大規則覆蓋下方） */
+        body .text-\[9px\]  { font-size: 11.5px !important; line-height: 1.5 !important; }
+        body .text-\[10px\] { font-size: 12.5px !important; line-height: 1.55 !important; }
+        body .text-\[11px\] { font-size: 13.5px !important; line-height: 1.5 !important; }
+        body .text-\[12px\] { font-size: 14.5px !important; line-height: 1.5 !important; }
+        body .text-\[13px\] { font-size: 15.5px !important; }
+        body .text-\[14px\] { font-size: 16px !important; }
 
-        /* Settings modal：整體放大字級（specificity 高過上方，主 UI 不會被蓋掉） */
-        .settings-pane .text-\[9px\]  { font-size: 11px !important; line-height: 1.5 !important; }
-        .settings-pane .text-\[10px\] { font-size: 12.5px !important; line-height: 1.55 !important; }
-        .settings-pane .text-\[11px\] { font-size: 13px !important; line-height: 1.5 !important; }
-        .settings-pane .text-\[12px\] { font-size: 14px !important; }
-        .settings-pane .text-\[13px\] { font-size: 15px !important; }
+        /* Settings modal：再往上一階，讓 Settings 內文比主 UI 略大、閱讀更舒服 */
+        .settings-pane .text-\[9px\]  { font-size: 12px !important; line-height: 1.5 !important; }
+        .settings-pane .text-\[10px\] { font-size: 13.5px !important; line-height: 1.55 !important; }
+        .settings-pane .text-\[11px\] { font-size: 14.5px !important; line-height: 1.5 !important; }
+        .settings-pane .text-\[12px\] { font-size: 15.5px !important; }
+        .settings-pane .text-\[13px\] { font-size: 16.5px !important; }
         .settings-pane code             { font-size: 0.95em !important; }
 
     </style>
