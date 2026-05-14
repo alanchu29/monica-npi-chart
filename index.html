@@ -391,11 +391,11 @@ function sanitizeLabels_(input) {
             return s;
         };
 
-        // 全新使用者預設保持空清單（Series / Phase 必須由使用者自己在 Settings 內建立），
+        // 全新使用者預設保持空清單（Series / Phase / PIC 必須由使用者自己在 Settings 內建立或實際填入 task），
         // Site 仍保留一組常見預設方便快速上手；雲端已有 labels 時會直接覆寫這些值。
         const INITIAL_SERIES_LIST = [];
         const INITIAL_SITE_LIST = ['MX', 'LZ', 'MY', 'CZ', 'TN'];
-        const DEFAULT_PICS = ['Sherry', 'Nick', 'Lambert', 'Rex'];
+        const DEFAULT_PICS = [];
 
         const INITIAL_SERIES_COLORS = {};
 
