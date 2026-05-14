@@ -45,7 +45,15 @@
         }
         .animate-shake { animation: shake 0.2s ease-in-out 0s 2; }
 
-        /* Settings modal：整體放大字級（一般 UI 仍維持原大小） */
+        /* 主 UI：整體字級微幅放大（settings modal 另有更大放大規則覆蓋下方） */
+        body .text-\[9px\]  { font-size: 10.5px !important; line-height: 1.5 !important; }
+        body .text-\[10px\] { font-size: 11.5px !important; line-height: 1.55 !important; }
+        body .text-\[11px\] { font-size: 12.5px !important; line-height: 1.5 !important; }
+        body .text-\[12px\] { font-size: 13.5px !important; line-height: 1.5 !important; }
+        body .text-\[13px\] { font-size: 14.5px !important; }
+        body .text-\[14px\] { font-size: 15px !important; }
+
+        /* Settings modal：整體放大字級（specificity 高過上方，主 UI 不會被蓋掉） */
         .settings-pane .text-\[9px\]  { font-size: 11px !important; line-height: 1.5 !important; }
         .settings-pane .text-\[10px\] { font-size: 12.5px !important; line-height: 1.55 !important; }
         .settings-pane .text-\[11px\] { font-size: 13px !important; line-height: 1.5 !important; }
@@ -1820,8 +1828,8 @@ function sanitizeLabels_(input) {
 
                     {/* Filters & Legend */}
                     <div className="bg-slate-800 border-b border-slate-700 px-4 py-1.5 space-y-1.5 shrink-0 text-[10px] font-black text-slate-300">
-                        <FilterGroup label="SERIES" options={dynamicOptions.categories} selectedList={selectedSeries} toggleFn={(i)=>handleFilterToggle(selectedSeries, setSelectedSeries, i)} colorClass="text-indigo-400" />
-                        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-700/50 pt-1.5 font-black">
+                        <div className="flex flex-wrap gap-x-6 gap-y-1.5 font-black">
+                            <FilterGroup label="SERIES" options={dynamicOptions.categories} selectedList={selectedSeries} toggleFn={(i)=>handleFilterToggle(selectedSeries, setSelectedSeries, i)} colorClass="text-indigo-400" />
                             <FilterGroup label="SITE" options={dynamicOptions.sites} selectedList={selectedSites} toggleFn={(i)=>handleFilterToggle(selectedSites, setSelectedSites, i)} colorClass="text-blue-400" />
                             <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
                         </div>
