@@ -74,7 +74,7 @@
     <script type="text/plain" id="app-gs-code">/**
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
- *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series/Phase/Site 設定 + 編輯密碼）
+ *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules 設定 + 編輯密碼）
  */
 function doGet(e) {
   if (e && e.parameter && e.parameter.meta === '1') {
@@ -136,7 +136,7 @@ function doGet(e) {
 /**
  * 處理 POST 請求：
  *   - { action: "setTitle", title }：重新命名整本試算表
- *   - { action: "setLabels", labels }：儲存 Series/Phase/Site 設定（DocumentProperties）
+ *   - { action: "setLabels", labels }：儲存 Series / Phase / Site / Resource Rules 設定（DocumentProperties）
  *   - { action: "setEditPassword", password }：儲存編輯密碼（""/缺省 = 無密碼）
  *   - 陣列 [...]：高效能整塊寫入專案資料
  */

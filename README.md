@@ -151,7 +151,7 @@ Monica NPI 專案排程看板（單頁版），用甘特圖方式顯示各專案
 /**
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
- *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series/Phase/Site 設定 + 編輯密碼）
+ *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules 設定 + 編輯密碼）
  */
 function doGet(e) {
   if (e && e.parameter && e.parameter.meta === '1') {
@@ -213,7 +213,7 @@ function doGet(e) {
 /**
  * 處理 POST 請求：
  *   - { action: "setTitle", title }：重新命名整本試算表
- *   - { action: "setLabels", labels }：儲存 Series/Phase/Site 設定（DocumentProperties）
+ *   - { action: "setLabels", labels }：儲存 Series / Phase / Site / Resource Rules 設定（DocumentProperties）
  *   - { action: "setEditPassword", password }：儲存編輯密碼（""/缺省 = 無密碼）
  *   - 陣列 [...]：高效能整塊寫入專案資料
  */
@@ -337,6 +337,45 @@ function sanitizeLabels_(input) {
     });
   }
 
+  // resourceRules: [{ id, name, enabled, seriesScope, phaseKeys, maxConcurrent }]
+  if (Array.isArray(input.resourceRules)) {
+    const seenIds = {};
+    out.resourceRules = [];
+    input.resourceRules.forEach(function (r) {
+      if (!r || typeof r !== 'object') return;
+      const id = String(r.id || '').trim();
+      if (!id || id.length > 60 || seenIds[id]) return;
+      const name = String(r.name || '').replace(/[\r\n]+/g, ' ').trim();
+      if (!name || name.length > 120) return;
+      const enabled = r.enabled !== false;
+      const dedupList = function (arr, maxLen) {
+        const out = [];
+        const seen = {};
+        (Array.isArray(arr) ? arr : []).forEach(function (v) {
+          const s = String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
+          if (!s || s.length > maxLen || seen[s]) return;
+          seen[s] = true;
+          out.push(s);
+        });
+        return out;
+      };
+      const seriesScope = dedupList(r.seriesScope, 120);
+      const phaseKeys = dedupList(r.phaseKeys, 60);
+      if (phaseKeys.length === 0) return;
+      const maxNum = Number(r.maxConcurrent);
+      if (!isFinite(maxNum) || maxNum < 0 || maxNum > 999) return;
+      seenIds[id] = true;
+      out.resourceRules.push({
+        id: id,
+        name: name,
+        enabled: enabled,
+        seriesScope: seriesScope,
+        phaseKeys: phaseKeys,
+        maxConcurrent: Math.floor(maxNum)
+      });
+    });
+  }
+
   return out;
 }
 ```
@@ -362,16 +401,25 @@ function sanitizeLabels_(input) {
 
 ## UI 速查
 
-- **Header 按鈕**（左到右）：篩選 / `Resource Check` / `分享連結` / `Settings` / `Enable edit mode` 或 `Finish editing`。
-  - 雲端有設密碼且尚未解鎖時，`Settings` 與 `Enable edit mode` 會帶鎖頭 icon，點下去要先輸入密碼。
-  - 雲端未設密碼則完全跳過密碼步驟，按一下直接生效。
+頁首採兩列結構，加上下方篩選列總共三排（手機 / 視窗較窄時會自動 wrap）：
+
+- **第一列（標題列，深底）**：
+  - 置中：同步狀態指示燈（綠 = 同步完成、橙色閃爍 = 同步中）+ 試算表標題 + `Gantt System Template · Designed by Dixon Chu`。標題本身已水平置中、左右各預留等寬空白讓視覺平衡。
+  - 最右：`分享連結`（紫）/ `Settings`（天藍）。
+- **第二列（篩選 + 動作列，稍淺底）**：
+  - 左到右：`SERIES` / `SITE` / `PIC` chip 篩選；超寬時自動換行。
+  - 最右：`Enable edit mode`（綠）或 `Finish editing`（橘）/ `Resource Check` 開關（OFF = 青；ON 有啟用規則 = 紅；ON 但無規則 = 琥珀，會提醒「請到 Settings → Resource 新增規則」）。
+- **第三列（PHASE 圖例）**：每個 Phase 的顏色色塊 + label，方便對照 Gantt cell。
+- **Projects portfolio 表頭**：左側是 `Projects` 標題 + 模糊搜尋框（依專案名稱關鍵字過濾，例如輸入 `Gen10` 會找到所有名稱含 Gen10 的專案）；搜尋有值時所有 Series 會自動展開。
+- **鎖頭提示**：雲端有設密碼且尚未解鎖時，`Settings` 與 `Enable edit mode` 會帶鎖頭 icon，點下去要先輸入密碼；雲端未設密碼則完全跳過密碼步驟，按一下直接生效。
 - **Settings 分頁**：
   - `Display`：可視日期範圍（前/後幾天）、甘特圖標題（= 試算表檔名）。
   - `Series`：新增 / 刪除 Series、調色。
   - `Phase`：新增 / 刪除 / 重新命名 Phase、調色。
   - `Site`：新增 / 刪除 Site。
+  - `Resource`：規則式 Resource Check 管理 — 新增 / 編輯 / 刪除 / 啟用切換規則；每條規則可指定 Series 範圍（空 = 全部）、Phase keys（至少一個）、最大同時數。
   - `Admin`：設定 / 變更 / 清除雲端密碼。
-  - `Import / Export`：把目前的標題、Series / Phase / Site / 顏色、所有 task 一鍵匯出成 JSON 檔；亦可上傳 JSON 檔回來套用。詳見下方「Import / Export」段落。
+  - `Import / Export`：把目前的標題、Series / Phase / Site / 顏色、Resource Rules、所有 task 一鍵匯出成 JSON 檔；亦可上傳 JSON 檔回來**覆寫**或**合併**。詳見下方「Import / Export」段落。
   - `GAS URL`：切換 Web App URL，複製分享連結；首次使用時會在這裡看到完整的「新使用者 7 步驟上手指南」。
 
 ---
@@ -400,6 +448,7 @@ function sanitizeLabels_(input) {
   - **建立 / 編輯 / 刪除**：Settings → Resource。每條規則內可用 chip 多選 Series 與 Phase，數字輸入框設門檻。所有變更立即同步雲端。
   - **Header 按鈕**：總開關。ON 且至少一條規則啟用 → 紅色 + `N rules` 計數；ON 但無規則 → 琥珀色 + `no rules` 提示；OFF → 灰色。Tooltip 會說明當下狀態。
   - **舊版相容**：舊版內建「Dev TNRS + Dev PI、所有 Series、同時段 > 2」是寫死的邏輯；新版預設無規則，需明確新增。Settings → Resource 在規則為空時會顯示「套用預設」按鈕，一鍵建立與舊版等同的規則。
+  - ⚠️ **升級時要記得重貼 Apps Script**：規則靠 `sanitizeLabels_` 處理 `resourceRules` 欄位。若 GAS code 是 2026 之前的舊版，後端會默默丟掉 `resourceRules` 而**不報錯**，症狀就是「在 UI 編完規則、重整頁面後規則消失」。請依 [Apps Script 程式碼](#apps-script-程式碼) 重貼最新版並 `部署 → 管理部署作業 → 編輯 → 新版本 → 部署`，URL 不變。
 
 ---
 
