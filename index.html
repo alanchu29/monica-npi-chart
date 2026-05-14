@@ -610,6 +610,7 @@ function sanitizeLabels_(input) {
                 "refresh-cw": <g><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></g>,
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
+                search: <g><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></g>,
                 spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>,
                 link: <g><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></g>,
                 settings: <g><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></g>
@@ -701,6 +702,8 @@ function sanitizeLabels_(input) {
             const [selectedSites, setSelectedSites] = useState([]);
             const [selectedPics, setSelectedPics] = useState([]);
             const [collapsedSeries, setCollapsedSeries] = useState({});
+            // 關鍵字搜尋：比對 project 名稱、phase task 描述、PIC、Site（不分大小寫）
+            const [projectSearch, setProjectSearch] = useState("");
             const [showModal, setShowModal] = useState(false);
             // seriesList / siteList 已改為雲端載入，初始 modalData 用內建預設；
             // 開新專案時 (見 "New Project" 按鈕) 會用當下最新的 seriesList / siteList 重設。
@@ -1731,13 +1734,21 @@ function sanitizeLabels_(input) {
                     if (!groups[c][p]) groups[c][p] = [];
                     groups[c][p].push(t);
                 });
+                // 關鍵字搜尋：只比對 project 名稱（子字串、不分大小寫）
+                const search = projectSearch.trim().toLowerCase();
+                const matchesSearch = (projName) => {
+                    if (!search) return true;
+                    return String(projName || "").toLowerCase().includes(search);
+                };
                 const result = [];
                 dynamicOptions.categories.forEach(c => {
-                    const ps = Object.entries(groups[c]).filter(e => e[1].length > 0).sort((a,b) => new Date(a[1][0].start) - new Date(b[1][0].start));
+                    const ps = Object.entries(groups[c])
+                        .filter(([projName, phases]) => phases.length > 0 && matchesSearch(projName))
+                        .sort((a, b) => new Date(a[1][0].start) - new Date(b[1][0].start));
                     if (ps.length > 0) result.push({ category: c, projects: ps });
                 });
                 return result;
-            }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList]);
+            }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList, projectSearch]);
 
             const resourceOverloadSet = useMemo(() => {
                 const trackedTypes = new Set(["DevelopmentTNRS", "DevelopmentPI"]);
@@ -1906,7 +1917,30 @@ function sanitizeLabels_(input) {
                                     ))}
                                 </tr>
                                 <tr className="bg-white border-b border-gray-300 font-sans">
-                                    <th className="w-72 sticky left-0 z-[450] bg-slate-100 border-r border-gray-300 h-8 font-black text-[9px] text-slate-500 px-4 uppercase tracking-tighter font-black font-sans">Project Portfolio</th>
+                                    <th className="w-72 sticky left-0 z-[450] bg-slate-100 border-r border-gray-300 h-8 px-3 font-sans align-middle">
+                                        <div className="flex items-center gap-1.5 h-full">
+                                            <span className="font-black text-[9px] text-slate-500 uppercase tracking-tighter shrink-0">Projects</span>
+                                            <div className="flex-1 relative min-w-0">
+                                                <Icon name="search" size={10} className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                <input
+                                                    type="text"
+                                                    value={projectSearch}
+                                                    onChange={(e) => setProjectSearch(e.target.value)}
+                                                    placeholder="搜尋 Project 名稱…"
+                                                    className="w-full pl-5 pr-5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-bold text-slate-700 normal-case tracking-normal outline-none focus:border-blue-500 placeholder:text-slate-400 placeholder:font-normal"
+                                                />
+                                                {projectSearch && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setProjectSearch("")}
+                                                        className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 leading-none w-3 h-3 flex items-center justify-center"
+                                                        aria-label="Clear search"
+                                                        title="清除搜尋"
+                                                    ><Icon name="x" size={10} /></button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </th>
                                     {days.map((day, i) => {
                                         const dateNum = dateToNum(day);
                                         const holiday = isHoliday(day);
@@ -1921,7 +1955,8 @@ function sanitizeLabels_(input) {
                             </thead>
                             <tbody className="divide-y divide-slate-400 relative">
                                 {groupedData.map(group => {
-                                    const isCollapsed = collapsedSeries[group.category];
+                                    const hasActiveSearch = projectSearch.trim().length > 0;
+                                    const isCollapsed = !hasActiveSearch && collapsedSeries[group.category];
                                     return (
                                         <React.Fragment key={group.category}>
                                             <tr className="bg-slate-100 border-y border-slate-300 cursor-pointer hover:bg-slate-200/80 select-none group z-10 relative font-black font-sans" onClick={() => setCollapsedSeries(prev => ({...prev, [group.category]: !isCollapsed}))}>
@@ -2006,6 +2041,21 @@ function sanitizeLabels_(input) {
                                         </React.Fragment>
                                     );
                                 })}
+                                {projectSearch.trim().length > 0 && groupedData.length === 0 && (
+                                    <tr>
+                                        <td colSpan={1 + days.length} className="bg-slate-50 text-center text-slate-500 py-6 font-bold text-[11px]">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Icon name="search" size={14} className="opacity-60" />
+                                                <span>找不到包含「<span className="text-slate-800">{projectSearch.trim()}</span>」的專案</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setProjectSearch("")}
+                                                    className="ml-1 px-2 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-black uppercase text-slate-600 hover:bg-slate-100"
+                                                >清除搜尋</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
