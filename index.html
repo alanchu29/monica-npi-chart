@@ -410,16 +410,16 @@ function sanitizeLabels_(input) {
             '#ddd6fe', '#fbcfe8', '#fed7aa', '#cffafe', '#e9d5ff'
         ];
 
-        // Settings tabs 顏色設定（淡淡的色相區隔，方便辨識）
+        // Settings tabs 顏色設定（每個 tab 自有淡色背景做被動識別，active 時加深 + 加底線）
         const SETTINGS_TABS = [
-            { id: "display",  label: "Display",         dot: "bg-sky-500",     active: "border-sky-600 text-sky-700 bg-sky-50/70" },
-            { id: "series",   label: "Series",          dot: "bg-indigo-500",  active: "border-indigo-600 text-indigo-700 bg-indigo-50/70" },
-            { id: "phase",    label: "Phase",           dot: "bg-amber-500",   active: "border-amber-600 text-amber-700 bg-amber-50/70" },
-            { id: "site",     label: "Site",            dot: "bg-blue-500",    active: "border-blue-600 text-blue-700 bg-blue-50/70" },
-            { id: "resource", label: "Resource",        dot: "bg-red-500",     active: "border-red-600 text-red-700 bg-red-50/70" },
-            { id: "admin",    label: "Admin",           dot: "bg-slate-500",   active: "border-slate-700 text-slate-800 bg-slate-100/80" },
-            { id: "io",       label: "Import / Export", dot: "bg-emerald-500", active: "border-emerald-600 text-emerald-700 bg-emerald-50/70" },
-            { id: "gas",      label: "GAS URL",         dot: "bg-violet-500",  active: "border-violet-600 text-violet-700 bg-violet-50/70" },
+            { id: "display",  label: "Display",         inactive: "bg-sky-50/70 text-sky-700/80 hover:bg-sky-100 border-transparent",         active: "bg-sky-100 text-sky-800 border-sky-600" },
+            { id: "series",   label: "Series",          inactive: "bg-indigo-50/70 text-indigo-700/80 hover:bg-indigo-100 border-transparent", active: "bg-indigo-100 text-indigo-800 border-indigo-600" },
+            { id: "phase",    label: "Phase",           inactive: "bg-amber-50/70 text-amber-700/80 hover:bg-amber-100 border-transparent",   active: "bg-amber-100 text-amber-800 border-amber-600" },
+            { id: "site",     label: "Site",            inactive: "bg-blue-50/70 text-blue-700/80 hover:bg-blue-100 border-transparent",      active: "bg-blue-100 text-blue-800 border-blue-600" },
+            { id: "resource", label: "Resource",        inactive: "bg-red-50/70 text-red-700/80 hover:bg-red-100 border-transparent",         active: "bg-red-100 text-red-800 border-red-600" },
+            { id: "admin",    label: "Admin",           inactive: "bg-slate-100/80 text-slate-600 hover:bg-slate-200 border-transparent",     active: "bg-slate-200 text-slate-900 border-slate-700" },
+            { id: "io",       label: "Import / Export", inactive: "bg-emerald-50/70 text-emerald-700/80 hover:bg-emerald-100 border-transparent", active: "bg-emerald-100 text-emerald-800 border-emerald-600" },
+            { id: "gas",      label: "GAS URL",         inactive: "bg-violet-50/70 text-violet-700/80 hover:bg-violet-100 border-transparent", active: "bg-violet-100 text-violet-800 border-violet-600" },
         ];
 
         const parseHexColor = (raw, fallback = DEFAULT_SERIES_COLOR) => {
@@ -701,6 +701,7 @@ function sanitizeLabels_(input) {
                 "folder-open": <path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />,
                 "edit-2": <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />,
                 check: <polyline points="20 6 9 17 4 12" />,
+                heart: <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />,
                 "refresh-cw": <g><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></g>,
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
@@ -840,6 +841,10 @@ function sanitizeLabels_(input) {
             const [newPhaseLabel, setNewPhaseLabel] = useState("");
             const [seriesNameDrafts, setSeriesNameDrafts] = useState({});
             const [siteNameDrafts, setSiteNameDrafts] = useState({});
+            const [phaseLabelDrafts, setPhaseLabelDrafts] = useState({});
+            const [editingSeriesName, setEditingSeriesName] = useState(null);
+            const [editingPhaseKey, setEditingPhaseKey] = useState(null);
+            const [editingSiteName, setEditingSiteName] = useState(null);
             const [newPhaseColor, setNewPhaseColor] = useState("#94a3b8");
             const [labelsTabErr, setLabelsTabErr] = useState("");
             const [labelsTabMsg, setLabelsTabMsg] = useState("");
@@ -2470,7 +2475,7 @@ function sanitizeLabels_(input) {
                     )}
                     {showSettingsModal && (
                         <div className="settings-pane fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
                                 <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center gap-3 shrink-0 bg-slate-50">
                                     <div>
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
@@ -2483,7 +2488,7 @@ function sanitizeLabels_(input) {
                                         <span className="text-[10px] text-amber-700 font-black text-right max-w-[11rem] leading-tight">請先於「GAS URL」分頁依指引貼上你自己的網址並儲存後再關閉。</span>
                                     )}
                                 </div>
-                                <div className="flex border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5 overflow-x-auto">
+                                <div className="flex flex-wrap border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5">
                                     {SETTINGS_TABS.map((tab) => {
                                         const isActive = settingsTab === tab.id;
                                         return (
@@ -2491,9 +2496,8 @@ function sanitizeLabels_(input) {
                                                 key={tab.id}
                                                 type="button"
                                                 onClick={() => { setSettingsTab(tab.id); setLabelsTabErr(""); setLabelsTabMsg(""); }}
-                                                className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all flex items-center gap-1.5 ${isActive ? tab.active : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50/60"}`}
+                                                className={`shrink-0 px-3 py-2.5 text-[11px] font-black uppercase rounded-t-lg border-b-2 transition-all ${isActive ? tab.active : tab.inactive}`}
                                             >
-                                                <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${tab.dot} ${isActive ? "" : "opacity-60"}`}></span>
                                                 {tab.label}
                                             </button>
                                         );
@@ -2550,7 +2554,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "series" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>專案分類 Series</strong>清單與<strong>顯示顏色</strong>。點選色塊調整顏色；直接編輯名稱欄位後按 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 或 <strong>Rename</strong> 按鈕即可重新命名（會連動更新已使用此名稱的所有 task），<kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 取消。
+                                                維護<strong>專案分類 Series</strong>清單與<strong>顯示顏色</strong>。點色塊調整顏色；點 <Icon name="edit-2" size={10} className="inline" /> 進入名稱編輯模式，修改後按 <strong>儲存</strong> 或 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 送出（會連動更新已使用此名稱的所有 task），按 <strong>取消</strong> 或 <kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 放棄。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2569,36 +2573,56 @@ function sanitizeLabels_(input) {
                                                 <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1.5 text-[11px] font-bold">
                                                     {seriesList.map((name) => {
                                                         const hex = parseHexColor((seriesColors || {})[name], DEFAULT_SERIES_COLOR);
+                                                        const isEditing = editingSeriesName === name;
                                                         const draft = seriesNameDrafts[name] !== undefined ? seriesNameDrafts[name] : name;
                                                         const trimmedDraft = String(draft || "").replace(/[\r\n]+/g, ' ').trim();
                                                         const isDirty = trimmedDraft !== name;
                                                         const isDup = isDirty && seriesList.some((n) => n !== name && n.toLowerCase() === trimmedDraft.toLowerCase());
                                                         const isValid = trimmedDraft.length > 0 && trimmedDraft.length <= 120 && !isDup;
+                                                        const startEdit = () => { setEditingSeriesName(name); setLabelsTabErr(""); setLabelsTabMsg(""); };
+                                                        const cancelEdit = () => {
+                                                            setEditingSeriesName(null);
+                                                            setSeriesNameDrafts((prev) => { if (!Object.prototype.hasOwnProperty.call(prev, name)) return prev; const next = { ...prev }; delete next[name]; return next; });
+                                                            setLabelsTabErr("");
+                                                        };
+                                                        const commitEdit = () => {
+                                                            if (!isDirty) { setEditingSeriesName(null); return; }
+                                                            if (isValid) { renameSeriesItem(name, draft); setEditingSeriesName(null); }
+                                                        };
                                                         return (
                                                             <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                                 <div className="flex items-center gap-2 min-w-0 flex-1">
                                                                     <input type="color" value={hex} onChange={(e) => updateSeriesColor(name, e.target.value)} className="w-7 h-7 rounded border border-slate-200 cursor-pointer bg-transparent shrink-0" title="調整顏色" />
-                                                                    <span className="inline-block w-2.5 h-2.5 rounded-sm border shrink-0" style={{ backgroundColor: hex, borderColor: 'rgba(15,23,42,0.4)' }}></span>
-                                                                    <input
-                                                                        value={draft}
-                                                                        onChange={(e) => { setSeriesNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter') { if (isDirty && isValid) renameSeriesItem(name, draft); }
-                                                                            else if (e.key === 'Escape') { setSeriesNameDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; }); }
-                                                                        }}
-                                                                        className={`flex-1 min-w-0 px-2 py-1 bg-slate-50 border rounded text-[11px] font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-200 focus:border-blue-500"}`}
-                                                                    maxLength={120}
-                                                                    />
-                                                                    {isDirty && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => { if (isValid) renameSeriesItem(name, draft); }}
-                                                                            disabled={!isValid}
-                                                                            title={isValid ? `重新命名 → "${trimmedDraft}"` : (isDup ? "Series 名稱重複" : "名稱不可為空")}
-                                                                            className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${isValid ? "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100" : "text-slate-300 border-slate-100 cursor-not-allowed"}`}
-                                                                        >
-                                                                            <Icon name="check" size={11} /> Rename
-                                                                        </button>
+                                                                    {isEditing ? (
+                                                                        <>
+                                                                            <input
+                                                                                autoFocus
+                                                                                value={draft}
+                                                                                onChange={(e) => { setSeriesNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') cancelEdit(); }}
+                                                                                className={`flex-1 min-w-0 px-2 py-1 bg-white border rounded text-[11px] font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-300 focus:border-blue-500"}`}
+                                                                                maxLength={120}
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={commitEdit}
+                                                                                disabled={isDirty && !isValid}
+                                                                                title={isDirty ? (isValid ? `儲存：${trimmedDraft}` : (isDup ? "Series 名稱重複" : "名稱不可為空")) : "未變更"}
+                                                                                className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${(isDirty && !isValid) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100"}`}
+                                                                            >
+                                                                                <Icon name="check" size={11} /> 儲存
+                                                                            </button>
+                                                                            <button type="button" onClick={cancelEdit} title="取消" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                                <Icon name="x" size={11} /> 取消
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className="px-2 py-0.5 rounded border text-[10px] font-black truncate flex-1 min-w-0" style={seriesTagStyle(name, seriesColors)}>{name}</span>
+                                                                            <button type="button" onClick={startEdit} title="重新命名" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                                <Icon name="edit-2" size={11} />
+                                                                            </button>
+                                                                        </>
                                                                     )}
                                                                     <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0 hidden sm:inline">{hex}</span>
                                                                 </div>
@@ -2615,8 +2639,8 @@ function sanitizeLabels_(input) {
                                                                         ),
                                                                         onConfirm: () => removeSeriesItem(name)
                                                                     })}
-                                                                    disabled={seriesList.length <= 1}
-                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${seriesList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                    disabled={seriesList.length <= 1 || isEditing}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${(seriesList.length <= 1 || isEditing) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
                                                                 >刪除</button>
                                                             </li>
                                                         );
@@ -2628,7 +2652,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "phase" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>。可調整名稱與顏色、新增或刪除；名稱會自動同步存檔，內部識別 key（右側灰字）保持不變以維持資料連結。
+                                                維護<strong>專案的 Phase 類型</strong>與<strong>顯示顏色</strong>。點色塊調整顏色；點 <Icon name="edit-2" size={10} className="inline" /> 進入名稱編輯模式，修改後按 <strong>儲存</strong> 或 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 送出。內部識別 key（右側灰字）保持不變以維持資料連結。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2647,11 +2671,62 @@ function sanitizeLabels_(input) {
                                                 <ul className="max-h-80 overflow-y-auto custom-scrollbar space-y-1.5 text-[11px] font-bold">
                                                     {phaseList.map((info) => {
                                                         const hex = parseHexColor(info.color, DEFAULT_PHASE_COLOR);
+                                                        const isEditing = editingPhaseKey === info.key;
+                                                        const draft = phaseLabelDrafts[info.key] !== undefined ? phaseLabelDrafts[info.key] : info.label;
+                                                        const trimmedDraft = String(draft || "").replace(/[\r\n]+/g, ' ').trim();
+                                                        const isDirty = trimmedDraft !== info.label;
+                                                        const isDup = isDirty && phaseList.some((p) => p.key !== info.key && p.label.toLowerCase() === trimmedDraft.toLowerCase());
+                                                        const isValid = trimmedDraft.length > 0 && trimmedDraft.length <= 120 && !isDup;
+                                                        const startEdit = () => { setEditingPhaseKey(info.key); setLabelsTabErr(""); setLabelsTabMsg(""); };
+                                                        const cancelEdit = () => {
+                                                            setEditingPhaseKey(null);
+                                                            setPhaseLabelDrafts((prev) => { if (!Object.prototype.hasOwnProperty.call(prev, info.key)) return prev; const next = { ...prev }; delete next[info.key]; return next; });
+                                                            setLabelsTabErr("");
+                                                        };
+                                                        const commitEdit = () => {
+                                                            if (!isDirty) { setEditingPhaseKey(null); return; }
+                                                            if (isValid) {
+                                                                updatePhaseLabel(info.key, trimmedDraft);
+                                                                setPhaseLabelDrafts((prev) => { const next = { ...prev }; delete next[info.key]; return next; });
+                                                                setEditingPhaseKey(null);
+                                                                setLabelsTabMsg(`已更新 Phase 名稱為 "${trimmedDraft}"（已同步到雲端）。`);
+                                                            }
+                                                        };
                                                         return (
                                                             <li key={info.key} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                                 <input type="color" value={hex} onChange={(e) => updatePhaseColor(info.key, e.target.value)} className="w-7 h-7 rounded border border-slate-200 cursor-pointer bg-transparent shrink-0" title="調整顏色" />
                                                                 <span className="inline-block w-2.5 h-2.5 rounded-sm border shrink-0" style={{ backgroundColor: hex, borderColor: 'rgba(15,23,42,0.4)' }}></span>
-                                                                <input value={info.label} onChange={(e) => updatePhaseLabel(info.key, e.target.value)} className="flex-1 min-w-0 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-black text-slate-800 outline-none focus:border-blue-500" maxLength={120} />
+                                                                {isEditing ? (
+                                                                    <>
+                                                                        <input
+                                                                            autoFocus
+                                                                            value={draft}
+                                                                            onChange={(e) => { setPhaseLabelDrafts((prev) => ({ ...prev, [info.key]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                                            onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') cancelEdit(); }}
+                                                                            className={`flex-1 min-w-0 px-2 py-1 bg-white border rounded text-[11px] font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-300 focus:border-blue-500"}`}
+                                                                            maxLength={120}
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={commitEdit}
+                                                                            disabled={isDirty && !isValid}
+                                                                            title={isDirty ? (isValid ? `儲存：${trimmedDraft}` : (isDup ? "Phase 名稱重複" : "名稱不可為空")) : "未變更"}
+                                                                            className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${(isDirty && !isValid) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100"}`}
+                                                                        >
+                                                                            <Icon name="check" size={11} /> 儲存
+                                                                        </button>
+                                                                        <button type="button" onClick={cancelEdit} title="取消" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                            <Icon name="x" size={11} /> 取消
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <span className="flex-1 min-w-0 px-2 py-1 text-[11px] font-black text-slate-800 truncate">{info.label}</span>
+                                                                        <button type="button" onClick={startEdit} title="重新命名" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                            <Icon name="edit-2" size={11} />
+                                                                        </button>
+                                                                    </>
+                                                                )}
                                                                 <span className="text-[9px] font-mono text-slate-400 uppercase shrink-0 hidden sm:inline">{info.key}</span>
                                                                 <button
                                                                     type="button"
@@ -2666,8 +2741,8 @@ function sanitizeLabels_(input) {
                                                                         ),
                                                                         onConfirm: () => removePhaseItem(info.key)
                                                                     })}
-                                                                    disabled={phaseList.length <= 1}
-                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${phaseList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                    disabled={phaseList.length <= 1 || isEditing}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${(phaseList.length <= 1 || isEditing) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
                                                                 >刪除</button>
                                                             </li>
                                                         );
@@ -2679,7 +2754,7 @@ function sanitizeLabels_(input) {
                                     {settingsTab === "site" && (
                                         <>
                                             <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
-                                                維護<strong>廠區 Site</strong>清單。新增、刪除均會即時同步；直接編輯名稱欄位後按 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 或 <strong>Rename</strong> 按鈕即可重新命名（會連動更新已使用此名稱的所有 task），<kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 取消。
+                                                維護<strong>廠區 Site</strong>清單。新增、刪除均會即時同步；點 <Icon name="edit-2" size={10} className="inline" /> 進入名稱編輯模式，修改後按 <strong>儲存</strong> 或 <kbd className="px-1 bg-slate-100 rounded">Enter</kbd> 送出（會連動更新已使用此名稱的所有 task），按 <strong>取消</strong> 或 <kbd className="px-1 bg-slate-100 rounded">Esc</kbd> 放棄。
                                             </p>
                                             {labelsSyncMsg && <p className="text-amber-700 text-[10px] font-bold bg-amber-50 border border-amber-200 rounded px-2 py-1">{labelsSyncMsg}</p>}
                                             {!labelsLoaded && <p className="text-slate-500 text-[10px] font-bold">正在從 Google 試算表載入 Series / Phase / Site 設定…</p>}
@@ -2696,34 +2771,55 @@ function sanitizeLabels_(input) {
                                                 <h4 className="text-[11px] font-black uppercase text-slate-600 tracking-wider border-b border-slate-200 pb-2">Site 清單</h4>
                                                 <ul className="max-h-72 overflow-y-auto custom-scrollbar space-y-1 text-[11px] font-bold">
                                                     {siteList.map((name) => {
+                                                        const isEditing = editingSiteName === name;
                                                         const draft = siteNameDrafts[name] !== undefined ? siteNameDrafts[name] : name;
                                                         const trimmedDraft = String(draft || "").replace(/[\r\n]+/g, ' ').trim();
                                                         const isDirty = trimmedDraft !== name;
                                                         const isDup = isDirty && siteList.some((n) => n !== name && n.toLowerCase() === trimmedDraft.toLowerCase());
                                                         const isValid = trimmedDraft.length > 0 && trimmedDraft.length <= 120 && !isDup;
+                                                        const startEdit = () => { setEditingSiteName(name); setLabelsTabErr(""); setLabelsTabMsg(""); };
+                                                        const cancelEdit = () => {
+                                                            setEditingSiteName(null);
+                                                            setSiteNameDrafts((prev) => { if (!Object.prototype.hasOwnProperty.call(prev, name)) return prev; const next = { ...prev }; delete next[name]; return next; });
+                                                            setLabelsTabErr("");
+                                                        };
+                                                        const commitEdit = () => {
+                                                            if (!isDirty) { setEditingSiteName(null); return; }
+                                                            if (isValid) { renameSiteItem(name, draft); setEditingSiteName(null); }
+                                                        };
                                                         return (
                                                             <li key={name} className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                                                                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                                                                    <input
-                                                                        value={draft}
-                                                                        onChange={(e) => { setSiteNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter') { if (isDirty && isValid) renameSiteItem(name, draft); }
-                                                                            else if (e.key === 'Escape') { setSiteNameDrafts((prev) => { const next = { ...prev }; delete next[name]; return next; }); }
-                                                                        }}
-                                                                        className={`flex-1 min-w-0 px-2 py-1 bg-slate-50 border rounded text-[11px] font-mono font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-200 focus:border-blue-500"}`}
-                                                                        maxLength={120}
-                                                                    />
-                                                                    {isDirty && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => { if (isValid) renameSiteItem(name, draft); }}
-                                                                            disabled={!isValid}
-                                                                            title={isValid ? `重新命名 → "${trimmedDraft}"` : (isDup ? "Site 名稱重複" : "名稱不可為空")}
-                                                                            className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${isValid ? "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100" : "text-slate-300 border-slate-100 cursor-not-allowed"}`}
-                                                                        >
-                                                                            <Icon name="check" size={11} /> Rename
-                                                                        </button>
+                                                                    {isEditing ? (
+                                                                        <>
+                                                                            <input
+                                                                                autoFocus
+                                                                                value={draft}
+                                                                                onChange={(e) => { setSiteNameDrafts((prev) => ({ ...prev, [name]: e.target.value })); setLabelsTabErr(""); setLabelsTabMsg(""); }}
+                                                                                onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') cancelEdit(); }}
+                                                                                className={`flex-1 min-w-0 px-2 py-1 bg-white border rounded text-[11px] font-mono font-black text-slate-800 outline-none ${isDirty ? (isValid ? "border-blue-400 focus:border-blue-500" : "border-red-400 focus:border-red-500") : "border-slate-300 focus:border-blue-500"}`}
+                                                                                maxLength={120}
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={commitEdit}
+                                                                                disabled={isDirty && !isValid}
+                                                                                title={isDirty ? (isValid ? `儲存：${trimmedDraft}` : (isDup ? "Site 名稱重複" : "名稱不可為空")) : "未變更"}
+                                                                                className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 ${(isDirty && !isValid) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100"}`}
+                                                                            >
+                                                                                <Icon name="check" size={11} /> 儲存
+                                                                            </button>
+                                                                            <button type="button" onClick={cancelEdit} title="取消" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                                <Icon name="x" size={11} /> 取消
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className="flex-1 min-w-0 px-2 py-1 font-mono text-[11px] font-black text-slate-800 truncate">{name}</span>
+                                                                            <button type="button" onClick={startEdit} title="重新命名" className="text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 flex items-center gap-1 text-slate-600 border-slate-200 hover:bg-slate-100">
+                                                                                <Icon name="edit-2" size={11} />
+                                                                            </button>
+                                                                        </>
                                                                     )}
                                                                 </div>
                                                                 <button
@@ -2739,8 +2835,8 @@ function sanitizeLabels_(input) {
                                                                         ),
                                                                         onConfirm: () => removeSiteItem(name)
                                                                     })}
-                                                                    disabled={siteList.length <= 1}
-                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${siteList.length <= 1 ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
+                                                                    disabled={siteList.length <= 1 || isEditing}
+                                                                    className={`text-[10px] font-black uppercase px-2 py-1 rounded border shrink-0 ${(siteList.length <= 1 || isEditing) ? "text-slate-300 border-slate-100 cursor-not-allowed" : "text-red-600 border-red-200 hover:bg-red-50"}`}
                                                                 >刪除</button>
                                                             </li>
                                                         );
@@ -3332,6 +3428,21 @@ function sanitizeLabels_(input) {
                                                                 </p>
                                                                 <p className="text-[10px] text-red-800 font-bold leading-relaxed">
                                                                     要分享給同事 → 用 Header 上的 <code className="bg-white px-1 rounded border border-red-300">分享連結</code> 按鈕，或到本分頁底下的「分享連結」區塊複製。
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 暖心彩蛋：請 Dixon 喝飲料 */}
+                                                    <div className="rounded-xl border-2 border-dashed border-amber-300 bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 p-4 shadow-sm">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-white flex items-center justify-center shadow-md">
+                                                                <Icon name="heart" size={18} />
+                                                            </div>
+                                                            <div className="space-y-1.5 flex-1">
+                                                                <div className="text-[12px] font-black text-orange-800 uppercase tracking-wide">A little thank-you</div>
+                                                                <p className="text-[11px] text-orange-900 font-bold leading-relaxed">
+                                                                    如果覺得這個系統模板好用，<strong className="bg-gradient-to-r from-rose-200 to-amber-200 px-1 rounded">請記得請 Dixon 一杯飲料</strong> <span className="font-mono text-rose-600">:)</span>
                                                                 </p>
                                                             </div>
                                                         </div>
