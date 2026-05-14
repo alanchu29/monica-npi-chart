@@ -2475,7 +2475,7 @@ function sanitizeLabels_(input) {
                     )}
                     {showSettingsModal && (
                         <div className="settings-pane fixed inset-0 z-[5500] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 font-sans font-black">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col text-left">
                                 <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center gap-3 shrink-0 bg-slate-50">
                                     <div>
                                         <h3 className="text-base font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
@@ -2485,7 +2485,7 @@ function sanitizeLabels_(input) {
                                     {normalizeGasUrl(gasUrl) ? (
                                         <button type="button" onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-800 p-1 shrink-0" aria-label="Close"><Icon name="x" size={22} /></button>
                                     ) : (
-                                        <span className="text-[10px] text-amber-700 font-black text-right max-w-[11rem] leading-tight">請先於「GAS URL」分頁依指引貼上你自己的網址並儲存後再關閉。</span>
+                                        <span className="text-[10px] text-amber-700 font-black text-right leading-tight whitespace-nowrap">請先於「GAS URL」分頁依指引貼上你自己的網址並儲存後再關閉。</span>
                                     )}
                                 </div>
                                 <div className="flex flex-wrap border-b border-slate-200 shrink-0 bg-white px-2 gap-0.5">
