@@ -408,12 +408,12 @@ function sanitizeLabels_(input) {
   - 最右：`分享連結`（紫）/ `Settings`（天藍）。
 - **第二列（篩選 + 動作列，稍淺底）**：
   - 左到右：`SERIES` / `SITE` / `PIC` chip 篩選；超寬時自動換行。
-  - 最右：`Enable edit mode`（綠）或 `Finish editing`（橘）/ `Resource Check` 開關（OFF = 青；ON 有啟用規則 = 紅；ON 但無規則 = 琥珀，會提醒「請到 Settings → Resource 新增規則」）。
+  - 最右：`Archived hidden / shown`（灰，僅在有專案被自動封存時出現）/ `Enable edit mode`（綠）或 `Finish editing`（橘）/ `Resource Check` 開關（OFF = 青；ON 有啟用規則 = 紅；ON 但無規則 = 琥珀，會提醒「請到 Settings → Resource 新增規則」）。
 - **第三列（PHASE 圖例）**：每個 Phase 的顏色色塊 + label，方便對照 Gantt cell。
 - **Projects portfolio 表頭**：左側是 `Projects` 標題 + 模糊搜尋框（依專案名稱關鍵字過濾，例如輸入 `Gen10` 會找到所有名稱含 Gen10 的專案）；搜尋有值時所有 Series 會自動展開。
 - **鎖頭提示**：雲端有設密碼且尚未解鎖時，`Settings` 與 `Enable edit mode` 會帶鎖頭 icon，點下去要先輸入密碼；雲端未設密碼則完全跳過密碼步驟，按一下直接生效。
 - **Settings 分頁**：
-  - `Display`：可視日期範圍（前/後幾天）、甘特圖標題（= 試算表檔名）。
+  - `Display`：可視日期範圍（前/後幾天）、甘特圖標題（= 試算表檔名）、自動封存已結束的專案。
   - `Series`：新增 / 刪除 Series、調色。
   - `Phase`：新增 / 刪除 / 重新命名 Phase、調色。
   - `Site`：新增 / 刪除 Site。
@@ -442,6 +442,15 @@ function sanitizeLabels_(input) {
 - **Series / Phase / Site / 顏色**：雲端共用，存於 GAS `DocumentProperties.labels`（JSON 字串）。在 UI 任何修改都會即時 POST `{ action: "setLabels", labels }`，其他人重新整理即可同步看到。
 - **可視日期範圍**：個人偏好，存於 `localStorage`，每人不同。預設前 7 天、後 90 天。
 - **「今日」紅線**：永遠依台北時區（Asia/Taipei）當日，不需手動設。
+- **自動封存已結束的專案**：個人偏好，存於 `localStorage`，每人不同。**預設啟用、門檻 30 天。**
+  - **判定方式**：把一個 project 底下所有 phase 的 `end` 取最大值（`end` 空白時退而取 `start`），若早於「台北時區今日 − 門檻天數」，該 project 就從清單隱藏。
+  - **純顯示層**：只是不畫出來，**不會刪除或修改試算表任何一列**。關掉設定或按一下 Header 的 `Archived` 按鈕就全部回來。
+  - **門檻 0 天** = 一結束就隱藏；門檻上限 3650 天。日期全部解析不出來的 project **永遠不會被封存**，避免資料還沒填完就消失。
+  - **搜尋時自動停用**：只要 Projects 搜尋框有輸入內容就不套用封存，確保舊專案一定搜得到。
+  - **Header 按鈕**：僅在「當下真的有專案被封存」時才出現，顯示被隱藏的總數。點一下切換顯示。此開關**不會被記住**，重新整理後回到隱藏狀態。
+  - **呈現方式**：封存的專案仍歸屬於原本的 Series，不會被抽到另一個獨立區塊。展開時每個 Series 群組內會依序是「現行專案 → `已封存 N` 小節標頭 → 封存專案」，封存列淡化並標上 `ARCHIVED`。這樣即使某個現行專案的起始日比封存專案更早（例如跨半年的長專案），兩者也不會交錯。
+  - **Series 標頭計數**：`N Items` **只計算現行專案**，封存數另外以灰色 `N archived` 標示，所以切換顯示時前面那個數字不會跳動。若某個 Series 的專案全被封存，收合狀態下整個群組（含標頭）都不顯示；展開後會以 `0 Items · N archived` 出現。
+  - ⚠️ 若把「可視日期範圍 → 往前」設得比封存門檻大（例如往前 365 天、門檻 30 天），時間軸上會出現一段「本來該有色塊、卻因為專案被封存而空白」的區間，Resource Check 也不會把這些專案計入。需要完整回顧歷史時，請按 `Archived` 按鈕展開，或直接關閉自動封存。
 - **Resource Check**：採**規則式 (rule-based) 設計**，每條規則同步存於 GAS `DocumentProperties.labels.resourceRules`，所有使用同一支 Web App 的人共用一份。
   - **資料結構**：`{ id, name, enabled, seriesScope: string[], phaseKeys: string[], maxConcurrent: number }`。`seriesScope` 為空 = 套用到所有 Series；否則只比對命名清單。`phaseKeys` 至少要有一個，否則整條規則會被忽略不檢查。
   - **觸發邏輯**：對每個 Series、每天（排除假日）數出「有任何 active phase 屬於 `rule.phaseKeys`」的 project 數，**> `rule.maxConcurrent`** 就視為超載；多條規則並行套用，命中任一條即標紅。Cell tooltip 會列出命中的規則名稱、count vs max。
@@ -486,7 +495,7 @@ function sanitizeLabels_(input) {
 }
 ```
 
-> 為了安全，**編輯密碼不會被匯出**；個人偏好（可視天數、Resource Check 開關狀態）也不在內，因為它們只屬於目前這顆瀏覽器。Resource Check 的**規則本身**屬於雲端共用設定，會被一起匯出 / 匯入。
+> 為了安全，**編輯密碼不會被匯出**；個人偏好（可視天數、Resource Check 開關狀態、自動封存設定）也不在內，因為它們只屬於目前這顆瀏覽器。Resource Check 的**規則本身**屬於雲端共用設定，會被一起匯出 / 匯入。
 
 ### 匯入
 

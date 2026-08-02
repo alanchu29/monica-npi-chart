@@ -384,6 +384,11 @@ function sanitizeLabels_(input) {
         const DEFAULT_VISIBLE_DAYS_AFTER = 90;
         const DEFAULT_CHART_TITLE = "Monica NPI Project Chart";
 
+        // 自動封存：專案的最後一個 phase 結束超過這個天數後，就從清單中隱藏。
+        // 純顯示層行為，試算表資料完全不動；隨時可在 Settings → Display 關閉或調整。
+        const DEFAULT_ARCHIVE_AFTER_DAYS = 30;
+        const MAX_ARCHIVE_AFTER_DAYS = 3650;
+
         /** 將使用者輸入的標題清理為適合送出的字串（去頭尾空白、單行、最多 120 字）。允許回傳空字串。 */
         const normalizeChartTitleInput = (raw) => {
             let s = String(raw ?? "").replace(/[\r\n]+/g, " ").trim();
@@ -656,7 +661,9 @@ function sanitizeLabels_(input) {
             const fallback = {
                 visibleDaysBefore: DEFAULT_VISIBLE_DAYS_BEFORE,
                 visibleDaysAfter: DEFAULT_VISIBLE_DAYS_AFTER,
-                resourceCheckEnabled: false
+                resourceCheckEnabled: false,
+                autoArchiveEnabled: true,
+                archiveAfterDays: DEFAULT_ARCHIVE_AFTER_DAYS
             };
             try {
                 const raw = localStorage.getItem(ADMIN_PREFS_STORAGE_KEY);
@@ -670,7 +677,9 @@ function sanitizeLabels_(input) {
                 return {
                     visibleDaysBefore: clampInt(p.visibleDaysBefore, fallback.visibleDaysBefore, 0, 730),
                     visibleDaysAfter: clampInt(p.visibleDaysAfter, fallback.visibleDaysAfter, 0, 730),
-                    resourceCheckEnabled: p.resourceCheckEnabled === true
+                    resourceCheckEnabled: p.resourceCheckEnabled === true,
+                    autoArchiveEnabled: p.autoArchiveEnabled !== false,
+                    archiveAfterDays: clampInt(p.archiveAfterDays, fallback.archiveAfterDays, 0, MAX_ARCHIVE_AFTER_DAYS)
                 };
             } catch (e) {
                 return fallback;
@@ -706,6 +715,7 @@ function sanitizeLabels_(input) {
                 plus: <g><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></g>,
                 x: <g><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></g>,
                 search: <g><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></g>,
+                archive: <g><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></g>,
                 "alert-triangle": <g><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></g>,
                 trash: <g><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></g>,
                 spreadsheet: <g><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="15" y1="3" x2="15" y2="21" /></g>,
@@ -820,6 +830,11 @@ function sanitizeLabels_(input) {
             const [adminSyncMsg, setAdminSyncMsg] = useState("");
             const [visibleDaysBefore, setVisibleDaysBefore] = useState(() => readInitialAdminPrefs().visibleDaysBefore);
             const [visibleDaysAfter, setVisibleDaysAfter] = useState(() => readInitialAdminPrefs().visibleDaysAfter);
+            // 自動封存：把「最後一個 phase 已結束超過 archiveAfterDays 天」的專案從清單隱藏。
+            // showArchivedProjects 刻意不持久化 —— 「顯示」只是臨時翻出來看，重新整理後回到隱藏狀態。
+            const [autoArchiveEnabled, setAutoArchiveEnabled] = useState(() => readInitialAdminPrefs().autoArchiveEnabled);
+            const [archiveAfterDays, setArchiveAfterDays] = useState(() => readInitialAdminPrefs().archiveAfterDays);
+            const [showArchivedProjects, setShowArchivedProjects] = useState(false);
             const [remoteChartTitle, setRemoteChartTitle] = useState("");
             // true = 已從 GAS 取得 title（或確認沒有 GAS URL / 失敗）。
             // 在這之前的短暫期間，header 顯示骨架（避免「先看到預設標題、再閃成自己的標題」的問題）。
@@ -872,6 +887,10 @@ function sanitizeLabels_(input) {
             const [lockGateError, setLockGateError] = useState(false);
             const [visibleDaysBeforeDraft, setVisibleDaysBeforeDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysBefore));
             const [visibleDaysAfterDraft, setVisibleDaysAfterDraft] = useState(() => String(readInitialAdminPrefs().visibleDaysAfter));
+            const [autoArchiveEnabledDraft, setAutoArchiveEnabledDraft] = useState(() => readInitialAdminPrefs().autoArchiveEnabled);
+            const [archiveAfterDaysDraft, setArchiveAfterDaysDraft] = useState(() => String(readInitialAdminPrefs().archiveAfterDays));
+            const [archiveSaveMsg, setArchiveSaveMsg] = useState("");
+            const [archiveSaveErr, setArchiveSaveErr] = useState("");
             const [chartTitleDraft, setChartTitleDraft] = useState("");
             const [displaySaveMsg, setDisplaySaveMsg] = useState("");
             const [displaySaveErr, setDisplaySaveErr] = useState("");
@@ -946,10 +965,12 @@ function sanitizeLabels_(input) {
                 const snap = {
                     visibleDaysBefore: overrides.visibleDaysBefore !== undefined ? overrides.visibleDaysBefore : visibleDaysBefore,
                     visibleDaysAfter: overrides.visibleDaysAfter !== undefined ? overrides.visibleDaysAfter : visibleDaysAfter,
-                    resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled
+                    resourceCheckEnabled: overrides.resourceCheckEnabled !== undefined ? overrides.resourceCheckEnabled : isResourceCheckEnabled,
+                    autoArchiveEnabled: overrides.autoArchiveEnabled !== undefined ? overrides.autoArchiveEnabled : autoArchiveEnabled,
+                    archiveAfterDays: overrides.archiveAfterDays !== undefined ? overrides.archiveAfterDays : archiveAfterDays
                 };
                 try { localStorage.setItem(ADMIN_PREFS_STORAGE_KEY, JSON.stringify(snap)); } catch (e) { /* ignore */ }
-            }, [visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled]);
+            }, [visibleDaysBefore, visibleDaysAfter, isResourceCheckEnabled, autoArchiveEnabled, archiveAfterDays]);
 
             // 推送編輯密碼到 GAS DocumentProperties（空字串 = 清除密碼，人人可解鎖）
             const saveEditPasswordToSheet = useCallback(async (newPassword) => {
@@ -1487,6 +1508,10 @@ function sanitizeLabels_(input) {
                 setHeaderShareLinkToast("");
                 setVisibleDaysBeforeDraft(String(visibleDaysBefore));
                 setVisibleDaysAfterDraft(String(visibleDaysAfter));
+                setAutoArchiveEnabledDraft(autoArchiveEnabled);
+                setArchiveAfterDaysDraft(String(archiveAfterDays));
+                setArchiveSaveMsg("");
+                setArchiveSaveErr("");
                 setChartTitleDraft(remoteChartTitle);
                 setIoExportStatus("");
                 setIoImportError("");
@@ -1905,6 +1930,27 @@ function sanitizeLabels_(input) {
                 setDisplaySaveMsg("已帶入內建預設（前 7 天、後 90 天），可按儲存套用。");
             };
 
+            const saveArchiveSettings = () => {
+                setArchiveSaveErr("");
+                setArchiveSaveMsg("");
+                const days = parseInt(String(archiveAfterDaysDraft).trim(), 10);
+                if (!Number.isFinite(days)) {
+                    setArchiveSaveErr("請輸入有效的整數天數。");
+                    return;
+                }
+                if (days < 0 || days > MAX_ARCHIVE_AFTER_DAYS) {
+                    setArchiveSaveErr(`天數須為 0～${MAX_ARCHIVE_AFTER_DAYS} 的整數。`);
+                    return;
+                }
+                setAutoArchiveEnabled(autoArchiveEnabledDraft);
+                setArchiveAfterDays(days);
+                setShowArchivedProjects(false);
+                persistAdminSnapshot({ autoArchiveEnabled: autoArchiveEnabledDraft, archiveAfterDays: days });
+                setArchiveSaveMsg(autoArchiveEnabledDraft
+                    ? `已儲存：結束超過 ${days} 天的專案會自動隱藏。`
+                    : "已儲存：自動封存已關閉，所有專案都會顯示。");
+            };
+
             const saveChartTitleToSheet = async () => {
                 setDisplaySaveErr("");
                 setDisplaySaveMsg("");
@@ -1974,7 +2020,7 @@ function sanitizeLabels_(input) {
                 return groups;
             }, [days]);
 
-            const groupedData = useMemo(() => {
+            const groupedResult = useMemo(() => {
                 const seriesFallback = seriesList[0] || "Unknown";
                 const filtered = tasks.filter(t => {
                     const matchCat = selectedSeries.length === 0 || selectedSeries.includes(formatText(t.category));
@@ -1997,15 +2043,50 @@ function sanitizeLabels_(input) {
                     if (!search) return true;
                     return String(projName || "").toLowerCase().includes(search);
                 };
+
+                // 自動封存：最後一個 phase 結束日早於「今日 − archiveAfterDays」的專案視為已結束。
+                // 搜尋進行中時整個停用，否則使用者搜尋舊專案名稱會什麼都找不到。
+                const cutoff = new Date(taiwanToday);
+                cutoff.setDate(cutoff.getDate() - archiveAfterDays);
+                const cutoffNum = dateToNum(cutoff);
+                const archiveEligible = autoArchiveEnabled && !search;
+                // strToNum 對空值 / 格式錯誤會回傳 0，因此只採計 > 0 的日期；
+                // 一個日期都解析不出來的專案不封存，避免資料不完整就被藏起來。
+                const isArchivedProject = (phases) => {
+                    let latest = 0;
+                    phases.forEach((ph) => {
+                        const e = strToNum(ph.end) || strToNum(ph.start);
+                        if (e > latest) latest = e;
+                    });
+                    return latest > 0 && latest < cutoffNum;
+                };
+
+                // 每個 Series 內部拆成「現行」與「已封存」兩段，讓封存的集中在該組末尾，
+                // 不會因為 start 較早而插進現行專案之間。
+                const byStart = (a, b) => new Date(a[1][0].start) - new Date(b[1][0].start);
+                let archivedCount = 0;
                 const result = [];
                 dynamicOptions.categories.forEach(c => {
-                    const ps = Object.entries(groups[c])
+                    const live = [], archived = [];
+                    Object.entries(groups[c])
                         .filter(([projName, phases]) => phases.length > 0 && matchesSearch(projName))
-                        .sort((a, b) => new Date(a[1][0].start) - new Date(b[1][0].start));
-                    if (ps.length > 0) result.push({ category: c, projects: ps });
+                        .forEach(([projName, phases]) => {
+                            if (archiveEligible && isArchivedProject(phases)) archived.push([projName, phases, true]);
+                            else live.push([projName, phases, false]);
+                        });
+                    archivedCount += archived.length;
+                    live.sort(byStart);
+                    archived.sort(byStart);
+                    if (live.length > 0 || archived.length > 0) {
+                        result.push({ category: c, projects: live, archivedProjects: archived });
+                    }
                 });
-                return result;
-            }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList, projectSearch]);
+                return { groups: result, archivedCount };
+            }, [tasks, selectedSeries, selectedSites, selectedPics, dynamicOptions, seriesList, projectSearch,
+                taiwanToday, autoArchiveEnabled, archiveAfterDays]);
+
+            const groupedData = groupedResult.groups;
+            const archivedProjectCount = groupedResult.archivedCount;
 
             // Resource Check：依使用者自訂規則計算超載。回傳 Map：
             //   key   = `${series}|${dateNum}`
@@ -2018,6 +2099,10 @@ function sanitizeLabels_(input) {
                 if (activeRules.length === 0) return map;
 
                 groupedData.forEach((group) => {
+                    // 只計入畫面上實際看得到的專案，讓 tooltip 的 count 對得上使用者數到的列數。
+                    const counted = showArchivedProjects
+                        ? group.projects.concat(group.archivedProjects)
+                        : group.projects;
                     days.forEach((day) => {
                         if (isHoliday(day)) return;
                         const dateNum = dateToNum(day);
@@ -2027,7 +2112,7 @@ function sanitizeLabels_(input) {
                             const watchSet = new Set(rule.phaseKeys);
 
                             let count = 0;
-                            group.projects.forEach(([, phases]) => {
+                            counted.forEach(([, phases]) => {
                                 const hit = phases.some((phase) => {
                                     const phaseType = normalizeTypeKey(phase.type, phaseKeys);
                                     return watchSet.has(phaseType)
@@ -2050,7 +2135,7 @@ function sanitizeLabels_(input) {
                 });
 
                 return map;
-            }, [groupedData, days, phaseKeys, resourceRules]);
+            }, [groupedData, days, phaseKeys, resourceRules, showArchivedProjects]);
 
             return (
                 <div className="flex flex-col h-screen overflow-hidden font-sans bg-slate-50">
@@ -2113,6 +2198,20 @@ function sanitizeLabels_(input) {
                             <FilterGroup label="SITE" options={dynamicOptions.sites} selectedList={selectedSites} toggleFn={(i)=>handleFilterToggle(selectedSites, setSelectedSites, i)} colorClass="text-blue-400" />
                             <FilterGroup label="PIC" options={dynamicOptions.pics} selectedList={selectedPics} toggleFn={(i)=>handleFilterToggle(selectedPics, setSelectedPics, i)} colorClass="text-emerald-400" />
                             <div className="ml-auto flex flex-wrap items-center gap-2">
+                                {archivedProjectCount > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowArchivedProjects((prev) => !prev)}
+                                        className={`px-3 py-1 rounded font-black text-[11px] transition-all border shadow-md uppercase tracking-tight flex items-center gap-1.5 ${showArchivedProjects ? "bg-slate-500 border-slate-400 text-white hover:bg-slate-400" : "bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 hover:text-white"}`}
+                                        title={showArchivedProjects
+                                            ? `目前一併顯示 ${archivedProjectCount} 個已結束超過 ${archiveAfterDays} 天的專案；點一下收合`
+                                            : `有 ${archivedProjectCount} 個專案已結束超過 ${archiveAfterDays} 天而隱藏；點一下顯示。門檻可到 Settings → Display 調整`}
+                                    >
+                                        <Icon name="archive" size={12} className="inline" />
+                                        {showArchivedProjects ? "Archived shown" : "Archived hidden"}
+                                        <span className="ml-0.5 px-1.5 py-0.5 rounded text-[9px] bg-slate-900/40 text-slate-100">{archivedProjectCount}</span>
+                                    </button>
+                                )}
                                 {isEditMode ? (
                                     <button
                                         type="button"
@@ -2259,7 +2358,8 @@ function sanitizeLabels_(input) {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-400 relative">
-                                {groupedData.map(group => {
+                                {/* 整個 Series 都被封存時，收合狀態下連群組標頭都不顯示，畫面才真的乾淨。 */}
+                                {groupedData.filter(g => showArchivedProjects || g.projects.length > 0).map(group => {
                                     const hasActiveSearch = projectSearch.trim().length > 0;
                                     const isCollapsed = !hasActiveSearch && collapsedSeries[group.category];
                                     return (
@@ -2270,10 +2370,16 @@ function sanitizeLabels_(input) {
                                                     <Icon name="folder-open" size={12} className="ml-1 text-blue-500" />
                                                     <span className="ml-1 font-black uppercase">{group.category}</span>
                                                     <span className="ml-2 text-[8px] px-2 py-0.5 bg-white rounded-full border border-slate-300 text-slate-500 font-bold">{group.projects.length} Items</span>
+                                                    {group.archivedProjects.length > 0 && (
+                                                        <span className="text-[8px] px-2 py-0.5 bg-slate-200 rounded-full border border-slate-300 text-slate-500 font-bold" title={`此 Series 另有 ${group.archivedProjects.length} 個已封存的專案`}>
+                                                            {group.archivedProjects.length} archived
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td colSpan={days.length}></td>
                                             </tr>
-                                            {!isCollapsed && group.projects.map(([projName, phases], projIdx) => {
+                                            {!isCollapsed && (() => {
+                                            const renderProjectRow = ([projName, phases, isArchivedProj], projIdx) => {
                                                 const projectHasResourceRisk = isResourceCheckEnabled && days.some(day => {
                                                     const dateNum = dateToNum(day);
                                                     const overload = resourceOverloadMap.get(`${group.category}|${dateNum}`);
@@ -2287,7 +2393,7 @@ function sanitizeLabels_(input) {
                                                 });
 
                                                 return (
-                                                <tr key={projName} className={`group/row relative transition-colors hover:z-[200] ${projectHasResourceRisk ? 'bg-red-50 hover:bg-red-100' : `hover:bg-sky-50 ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}`}>
+                                                <tr key={projName} className={`group/row relative transition-colors hover:z-[200] ${isArchivedProj ? 'opacity-60 hover:opacity-100' : ''} ${projectHasResourceRisk ? 'bg-red-50 hover:bg-red-100' : `hover:bg-sky-50 ${projIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}`}>
                                                     <td onClick={() => {if(isEditMode) {
                                                         setOriginalProjectName(projName);
                                                         setModalData({ project: projName, category: phases[0].category, pic: phases[0].pic, site: phases[0].site, phases: phases.map((p,idx)=>({...p, type: normalizeTypeKey(p.type, phaseKeys), localId: Date.now()+idx})) });
@@ -2297,6 +2403,7 @@ function sanitizeLabels_(input) {
                                                             <div className="flex items-center justify-between font-black font-sans">
                                                                 <span className={`text-[11px] truncate uppercase tracking-tight ${projectHasResourceRisk ? 'text-red-700' : 'text-gray-900'}`}>{projName}</span>
                                                                 <div className="flex items-center gap-1">
+                                                                    {isArchivedProj && <span className="px-1 py-0.5 rounded-[2px] text-[7px] font-black bg-slate-200 text-slate-500 border border-slate-300 uppercase tracking-tight shrink-0">Archived</span>}
                                                                     {isEditMode && <Icon name="edit-2" size={10} className="text-orange-500" />}
                                                                 </div>
                                                             </div>
@@ -2355,7 +2462,27 @@ function sanitizeLabels_(input) {
                                                         );
                                                     })}
                                                 </tr>
-                                            )})}
+                                            )};
+                                            const rows = group.projects.map(renderProjectRow);
+                                            if (showArchivedProjects && group.archivedProjects.length > 0) {
+                                                rows.push(
+                                                    <tr key="__archived_divider__" className="bg-slate-100/70 border-y border-slate-200">
+                                                        <td className="sticky left-0 z-[50] bg-slate-100/90 pl-8 pr-3 py-0.5 border-r-2 border-slate-300 shadow-[4px_0_8px_rgba(15,23,42,0.05)]">
+                                                            <div className="flex items-center gap-1.5 text-slate-500">
+                                                                <Icon name="archive" size={10} />
+                                                                <span className="font-black text-[9px] uppercase tracking-tight">已封存</span>
+                                                                <span className="text-[8px] px-1.5 py-0.5 bg-white rounded-full border border-slate-300 font-bold">{group.archivedProjects.length}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td colSpan={days.length}></td>
+                                                    </tr>
+                                                );
+                                                group.archivedProjects.forEach((proj, i) => {
+                                                    rows.push(renderProjectRow(proj, group.projects.length + i));
+                                                });
+                                            }
+                                            return rows;
+                                            })()}
                                         </React.Fragment>
                                     );
                                 })}
@@ -2550,6 +2677,43 @@ function sanitizeLabels_(input) {
                                                 <div className="flex flex-wrap gap-2">
                                                     <button type="button" onClick={saveVisibleDateRange} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">儲存可視範圍</button>
                                                     <button type="button" onClick={resetVisibleRangeDraftBuiltin} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-xl uppercase text-[10px]">帶入內建預設</button>
+                                                </div>
+                                            </section>
+                                            <section className="space-y-3">
+                                                <h4 className="text-[11px] font-black uppercase text-slate-500 tracking-wider border-b border-slate-100 pb-2">自動封存已結束的專案</h4>
+                                                <p className="text-slate-600 text-[10px] font-bold leading-relaxed">
+                                                    專案的<strong>最後一個 Phase 結束超過指定天數</strong>後，就自動從清單中隱藏，讓畫面只留下進行中與即將開始的案子。這<strong>只是顯示上的隱藏</strong> — 試算表裡的資料完全不會被刪除或修改，隨時可以關閉此設定，或按篩選列上的 <strong>Archived</strong> 按鈕把它們叫回來。展開時封存的專案會集中在<strong>各自 Series 群組內的「已封存」小節</strong>，不會跟現行專案交錯。搜尋 Project 名稱時也會自動略過封存，確保舊案子一定找得到。
+                                                </p>
+                                                <div className="rounded-xl border-2 border-slate-200 bg-slate-50/80 p-3 space-y-2.5">
+                                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={autoArchiveEnabledDraft}
+                                                            onChange={(e) => { setAutoArchiveEnabledDraft(e.target.checked); setArchiveSaveErr(""); setArchiveSaveMsg(""); }}
+                                                            className="w-4 h-4 accent-blue-600"
+                                                        />
+                                                        <span className="text-[11px] font-black text-slate-700">啟用自動封存</span>
+                                                    </label>
+                                                    <div className="space-y-1">
+                                                        <label className="block text-[9px] font-black text-slate-400 uppercase">結束後幾天隱藏</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="number"
+                                                                min={0}
+                                                                max={MAX_ARCHIVE_AFTER_DAYS}
+                                                                value={archiveAfterDaysDraft}
+                                                                disabled={!autoArchiveEnabledDraft}
+                                                                onChange={(e) => { setArchiveAfterDaysDraft(e.target.value); setArchiveSaveErr(""); setArchiveSaveMsg(""); }}
+                                                                className={`w-28 px-3 py-2 border-2 rounded-xl text-[11px] font-mono outline-none focus:border-blue-500 ${autoArchiveEnabledDraft ? "bg-white border-slate-200" : "bg-slate-100 border-slate-100 text-slate-400 cursor-not-allowed"}`}
+                                                            />
+                                                            <span className="text-[10px] font-bold text-slate-500">天（0 = 一結束就隱藏）</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {archiveSaveErr && <p className="text-red-600 text-[10px] font-bold">{archiveSaveErr}</p>}
+                                                {archiveSaveMsg && <p className="text-emerald-700 text-[10px] font-bold">{archiveSaveMsg}</p>}
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={saveArchiveSettings} className="px-4 py-2 bg-slate-900 text-white font-black rounded-xl hover:bg-blue-600 uppercase text-[10px]">儲存封存設定</button>
                                                 </div>
                                             </section>
                                         </>
