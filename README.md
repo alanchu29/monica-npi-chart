@@ -151,7 +151,7 @@ Monica NPI 專案排程看板（單頁版），用甘特圖方式顯示各專案
 /**
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
- *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules 設定 + 編輯密碼）
+ *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules / Holidays 設定 + 編輯密碼）
  */
 function doGet(e) {
   if (e && e.parameter && e.parameter.meta === '1') {
@@ -213,7 +213,7 @@ function doGet(e) {
 /**
  * 處理 POST 請求：
  *   - { action: "setTitle", title }：重新命名整本試算表
- *   - { action: "setLabels", labels }：儲存 Series / Phase / Site / Resource Rules 設定（DocumentProperties）
+ *   - { action: "setLabels", labels }：儲存 Series / Phase / Site / Resource Rules / Holidays 設定（DocumentProperties）
  *   - { action: "setEditPassword", password }：儲存編輯密碼（""/缺省 = 無密碼）
  *   - 陣列 [...]：高效能整塊寫入專案資料
  */
@@ -376,6 +376,50 @@ function sanitizeLabels_(input) {
     });
   }
 
+  // holidays: [{ id, name, kind:'off'|'work', mode:'single'|'range'|'yearly', start?, end?, month?, day? }]
+  if (Array.isArray(input.holidays)) {
+    const seenHol = {};
+    const isDateStr = function (s) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+      const d = new Date(s + 'T12:00:00');
+      return !isNaN(d.getTime());
+    };
+    out.holidays = [];
+    input.holidays.forEach(function (h) {
+      if (!h || typeof h !== 'object' || out.holidays.length >= 200) return;
+      const id = String(h.id || '').trim();
+      if (!id || id.length > 60 || seenHol[id]) return;
+      let name = String(h.name || '').replace(/[\r\n]+/g, ' ').trim();
+      if (!name) name = '未命名';
+      if (name.length > 60) name = name.slice(0, 60);
+      const kind = h.kind === 'work' ? 'work' : 'off';
+      const mode = (h.mode === 'range' || h.mode === 'yearly') ? h.mode : 'single';
+
+      let entry = null;
+      if (mode === 'yearly') {
+        const month = Number(h.month), day = Number(h.day);
+        if (!(month >= 1 && month <= 12 && day >= 1 && day <= 31)) return;
+        const probe = new Date(2024, month - 1, day, 12, 0, 0);
+        if (probe.getMonth() !== month - 1 || probe.getDate() !== day) return;
+        entry = { id: id, name: name, kind: kind, mode: mode, month: month, day: day };
+      } else {
+        const start = String(h.start || '').split('T')[0];
+        if (!isDateStr(start)) return;
+        if (mode === 'range') {
+          const end = String(h.end || '').split('T')[0];
+          if (!isDateStr(end) || end < start) return;
+          const span = Math.round((new Date(end + 'T12:00:00') - new Date(start + 'T12:00:00')) / 86400000) + 1;
+          if (span > 366) return;
+          entry = { id: id, name: name, kind: kind, mode: mode, start: start, end: end };
+        } else {
+          entry = { id: id, name: name, kind: kind, mode: 'single', start: start };
+        }
+      }
+      seenHol[id] = true;
+      out.holidays.push(entry);
+    });
+  }
+
   return out;
 }
 ```
@@ -410,6 +454,8 @@ function sanitizeLabels_(input) {
   - 左到右：`SERIES` / `SITE` / `PIC` chip 篩選；超寬時自動換行。
   - 最右：`Archived hidden / shown`（灰，僅在有專案被自動封存時出現）/ `Enable edit mode`（綠）或 `Finish editing`（橘）/ `Resource Check` 開關（OFF = 青；ON 有啟用規則 = 紅；ON 但無規則 = 琥珀，會提醒「請到 Settings → Resource 新增規則」）。
 - **第三列（PHASE 圖例）**：每個 Phase 的顏色色塊 + label，方便對照 Gantt cell。
+- **Gantt cell tooltip**：滑鼠移到任一 phase 色塊上會浮出詳細資訊 — Phase 名稱、起訖日、**工作天數**（綠色標籤，該 phase 區間扣掉假日後的天數）與「共 N 天，假日 M 天」、task 內容、所屬專案；若該格觸發 Resource Check 超載，還會列出命中的規則。工作天的假日定義與時間軸上的紅色日期一致（週末 + Settings → Holiday 自訂的假日，扣掉補班日）。
+- **時間軸日期顏色**：假日顯示紅色（灰底），自訂假日另加紅色點狀底線；補班日顯示藍色加藍色點狀底線並計入工作天。滑鼠移到日期上會顯示該日的假日名稱。
 - **Projects portfolio 表頭**：左側是 `Projects` 標題 + 模糊搜尋框（依專案名稱關鍵字過濾，例如輸入 `Gen10` 會找到所有名稱含 Gen10 的專案）；搜尋有值時所有 Series 會自動展開。
 - **鎖頭提示**：雲端有設密碼且尚未解鎖時，`Settings` 與 `Enable edit mode` 會帶鎖頭 icon，點下去要先輸入密碼；雲端未設密碼則完全跳過密碼步驟，按一下直接生效。
 - **Settings 分頁**：
@@ -418,6 +464,7 @@ function sanitizeLabels_(input) {
   - `Phase`：新增 / 刪除 / 重新命名 Phase、調色。
   - `Site`：新增 / 刪除 Site。
   - `Resource`：規則式 Resource Check 管理 — 新增 / 編輯 / 刪除 / 啟用切換規則；每條規則可指定 Series 範圍（空 = 全部）、Phase keys（至少一個）、最大同時數。
+  - `Holiday`：自訂假日行事曆 — 在內建的週末之外補上國定假日與補班日；支援單日 / 區間 / 每年重複。
   - `Admin`：設定 / 變更 / 清除雲端密碼。
   - `Import / Export`：把目前的標題、Series / Phase / Site / 顏色、Resource Rules、所有 task 一鍵匯出成 JSON 檔；亦可上傳 JSON 檔回來**覆寫**或**合併**。詳見下方「Import / Export」段落。
   - `GAS URL`：切換 Web App URL，複製分享連結；首次使用時會在這裡看到完整的「新使用者 7 步驟上手指南」。
@@ -458,6 +505,17 @@ function sanitizeLabels_(input) {
   - **Header 按鈕**：總開關。ON 且至少一條規則啟用 → 紅色 + `N rules` 計數；ON 但無規則 → 琥珀色 + `no rules` 提示；OFF → 灰色。Tooltip 會說明當下狀態。
   - **舊版相容**：舊版內建「Dev TNRS + Dev PI、所有 Series、同時段 > 2」是寫死的邏輯；新版預設無規則，需明確新增。Settings → Resource 在規則為空時會顯示「套用預設」按鈕，一鍵建立與舊版等同的規則。
   - ⚠️ **升級時要記得重貼 Apps Script**：規則靠 `sanitizeLabels_` 處理 `resourceRules` 欄位。若 GAS code 是 2026 之前的舊版，後端會默默丟掉 `resourceRules` 而**不報錯**，症狀就是「在 UI 編完規則、重整頁面後規則消失」。請依 [Apps Script 程式碼](#apps-script-程式碼) 重貼最新版並 `部署 → 管理部署作業 → 編輯 → 新版本 → 部署`，URL 不變。
+- **假日行事曆（Settings → Holiday）**：自訂國定假日與補班日，存於 GAS `DocumentProperties.labels.holidays`，**全團隊共用一份**，確保每個人算出來的工作天一致。
+  - **週末是內建的**，不需要也不應該在這裡逐週新增；這份清單只用來記「週末以外的例外」。
+  - **資料結構**：`{ id, name, kind, mode, start?, end?, month?, day? }`。
+    - `kind`：`off` = 放假、`work` = **補班日**（把原本是週末的那天拉回工作日，例如台灣調整放假的補上班）。
+    - `mode`：`single` 單日 / `range` 起訖區間（連假一筆搞定，上限 366 天）/ `yearly` 每年重複的固定月日（例如每年 1/1、10/10，不必逐年新增）。
+  - **優先序**：指定到日的設定（`single` / `range`）會蓋過 `yearly`，所以某一年的節日若調整放假，只要為那一年單獨補一筆即可，不用動每年重複的規則。而任何一筆設定都蓋過「週末」預設。
+  - **影響範圍**：時間軸上的日期顏色、phase tooltip 的工作天數、Resource Check 的每日統計（假日不計）三處共用同一份判定，不會出現對不起來的情況。
+  - **主 UI 呈現**：假日 = 紅色日期（自訂的另加紅色點狀底線，hover 顯示名稱）；補班日 = 藍色日期加藍色點狀底線，並且**計入工作天**。
+  - **勞動節**：舊版把「每年 5/1」寫死在假日判定裡，現在改成預設就存在清單中的一筆 `yearly` 規則，行為不變但可以自行修改或刪除。
+  - **容量**：labels 整包（Series / Phase / Site / 顏色 / Resource Rules / Holidays）在 GAS 端有 9000 字元上限，超過會被拒收。前端已改為**超過就不送出**（不再靜默失敗），且使用量達 85% 時 Holiday 分頁會顯示警告。連假請用 `range` 而不是逐日新增，可大幅節省空間。
+  - ⚠️ **同樣需要重貼 Apps Script**：`holidays` 也是靠 `sanitizeLabels_` 處理，舊版 GAS 會默默丟掉這個欄位，症狀是「假日設定重整後消失」。處理方式同上。
 
 ---
 
@@ -486,6 +544,11 @@ function sanitizeLabels_(input) {
     "resourceRules": [
       { "id": "rule-xxxx", "name": "Dev resource limit", "enabled": true,
         "seriesScope": [], "phaseKeys": ["DevelopmentTNRS", "DevelopmentPI"], "maxConcurrent": 2 }
+    ],
+    "holidays": [
+      { "id": "hol-labour-day", "name": "勞動節", "kind": "off", "mode": "yearly", "month": 5, "day": 1 },
+      { "id": "hol-xxxx", "name": "春節", "kind": "off", "mode": "range", "start": "2027-02-14", "end": "2027-02-22" },
+      { "id": "hol-yyyy", "name": "補班", "kind": "work", "mode": "single", "start": "2027-02-27" }
     ]
   },
   "tasks": [
