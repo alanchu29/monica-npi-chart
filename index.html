@@ -75,9 +75,13 @@
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
  *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules / Holidays 設定 + 編輯密碼）
+ *   - ?callback=fn：以 JSONP 包裝回傳（避開瀏覽器封鎖第三方 Cookie 時 fetch 讀不到 googleusercontent 轉址的問題）
  */
 function doGet(e) {
-  if (e && e.parameter && e.parameter.meta === '1') {
+  const params = (e && e.parameter) ? e.parameter : {};
+  let bodyText;
+
+  if (params.meta === '1') {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getActiveSheet();
     const props = PropertiesService.getDocumentProperties();
@@ -93,43 +97,58 @@ function doGet(e) {
     const editPasswordRaw = props.getProperty('editPassword');
     const editPassword = editPasswordRaw == null ? '' : String(editPasswordRaw);
 
-    const payload = {
+    bodyText = JSON.stringify({
       title: ss.getName(),
       sheetName: sheet.getName(),
       labels: labels,
       editPassword: editPassword,
       updatedAt: new Date().toISOString()
-    };
-    return ContentService.createTextOutput(JSON.stringify(payload))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-
-  if (data.length <= 1) {
-    return ContentService.createTextOutput(JSON.stringify([]))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  const headers = data.shift();
-  const json = data.map(row => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      if (row[i] instanceof Date) {
-        const d = row[i];
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        obj[h] = `${year}-${month}-${day}`;
-      } else {
-        obj[h] = row[i];
-      }
     });
-    return obj;
-  });
+  } else {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const data = sheet.getDataRange().getValues();
 
-  return ContentService.createTextOutput(JSON.stringify(json))
+    if (data.length <= 1) {
+      bodyText = '[]';
+    } else {
+      const headers = data.shift();
+      const json = data.map(function (row) {
+        const obj = {};
+        headers.forEach(function (h, i) {
+          if (row[i] instanceof Date) {
+            const d = row[i];
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            obj[h] = year + '-' + month + '-' + day;
+          } else {
+            obj[h] = row[i];
+          }
+        });
+        return obj;
+      });
+      bodyText = JSON.stringify(json);
+    }
+  }
+
+  return respondJson_(bodyText, params.callback);
+}
+
+/** 只允許簡單識別字當 JSONP callback，避免把任意字串寫進腳本。 */
+function sanitizeCallback_(name) {
+  const s = String(name == null ? '' : name);
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]{0,80}$/.test(s)) return '';
+  return s;
+}
+
+/** 有合法 callback → JSONP；否則維持原本的 raw JSON（網址列直接開 /exec 仍可用）。 */
+function respondJson_(jsonText, callback) {
+  const cb = sanitizeCallback_(callback);
+  if (cb) {
+    return ContentService.createTextOutput(cb + '(' + jsonText + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(jsonText)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -390,6 +409,58 @@ function sanitizeLabels_(input) {
 
         const isLikelyGasWebAppUrl = (url) =>
             /script\.google\.com\/macros\/s\//i.test(url) && /\/exec$/i.test(url);
+
+        /**
+         * 用 JSONP 讀取 GAS Web App 的 JSON。
+         *
+         * 為什麼不用 fetch：ContentService 會 302 到一次性的 script.googleusercontent.com。
+         * 對本頁來說那是第三方網域，Chrome 封鎖第三方 Cookie、Edge 追蹤防護都會讓
+         * fetch 拿不到內容（404 或永遠掛著）。JSONP 改走 <script src>，不依賴第三方
+         * Cookie / CORS，是 GAS 官方支援的瀏覽器讀取方式。後端需部署支援 ?callback= 的版本。
+         */
+        const GAS_FETCH_TIMEOUT_MS = 12000;
+        const fetchGasJsonpOnce = (url, timeoutMs) => new Promise((resolve, reject) => {
+            const cbName = "__gasJsonp_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+            const script = document.createElement("script");
+            let settled = false;
+            const cleanup = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+                if (script.parentNode) script.parentNode.removeChild(script);
+            };
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error("GAS JSONP timeout — 若持續發生，請確認 Apps Script 已部署支援 ?callback= 的最新版"));
+            }, timeoutMs);
+            window[cbName] = (data) => {
+                cleanup();
+                resolve(data);
+            };
+            script.onerror = () => {
+                cleanup();
+                reject(new Error("GAS JSONP load failed"));
+            };
+            const sep = url.includes("?") ? "&" : "?";
+            script.src = url + sep + "callback=" + encodeURIComponent(cbName) + "&t=" + Date.now();
+            script.async = true;
+            document.head.appendChild(script);
+        });
+        const fetchGasJson = async (url, { retries = 2, timeoutMs = GAS_FETCH_TIMEOUT_MS } = {}) => {
+            let lastErr = null;
+            for (let attempt = 0; attempt <= retries; attempt++) {
+                try {
+                    return await fetchGasJsonpOnce(url, timeoutMs);
+                } catch (err) {
+                    lastErr = err;
+                }
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+                }
+            }
+            throw lastErr || new Error("GAS 讀取失敗");
+        };
 
         /** 目前頁面網址 + ?gas=… 供分享；開啟時 readInitialGasUrl 會讀取並寫入 localStorage。 */
         const buildShareableChartUrl = (gasWebAppUrl) => {
@@ -1605,24 +1676,23 @@ function sanitizeLabels_(input) {
                 const base = normalizeGasUrl(gasUrl);
                 if (!base) {
                     setTasks([]);
-                    setErrorMsg("Set your Google Apps Script Web App URL in Settings → GAS URL tab.");
+                    setErrorMsg("尚未設定 Google Apps Script Web App URL，請到 Settings → GAS URL 分頁填入。");
                     setSyncStatus('error');
                     return;
                 }
                 setSyncStatus('syncing');
                 try {
-                    const res = await fetch(base + "?t=" + Date.now());
-                    const data = await res.json();
+                    const data = await fetchGasJson(base);
                     if (Array.isArray(data)) {
                         setTasks(data);
                         setSyncStatus('synced');
                         setErrorMsg(null);
                     } else {
-                        setErrorMsg("Invalid response from cloud (expected JSON array).");
+                        setErrorMsg("雲端回應的格式不正確（預期是 JSON 陣列）。這通常表示 Apps Script 程式碼不是最新版，或部署時選到了會導向登入頁的存取權限。");
                         setSyncStatus('error');
                     }
                 } catch (err) {
-                    setErrorMsg("Cloud connection failed.");
+                    setErrorMsg("連線失敗。常見原因：① Apps Script 尚未部署支援 JSONP（?callback=）的最新版 — 請到 Settings → GAS URL 複製程式碼重貼並「新版本」部署；②「誰可以存取」沒設成「所有人」；③ 網址結尾是 /dev 而不是 /exec；④ 網路異常。");
                     setSyncStatus('error');
                 }
             }, [gasUrl]);
@@ -1638,8 +1708,7 @@ function sanitizeLabels_(input) {
                     return;
                 }
                 try {
-                    const res = await fetch(base + "?meta=1&t=" + Date.now());
-                    const data = await res.json();
+                    const data = await fetchGasJson(base + "?meta=1");
                     if (!data || typeof data !== "object" || Array.isArray(data)) {
                         setChartTitleLoaded(true);
                         return;
@@ -1749,7 +1818,7 @@ function sanitizeLabels_(input) {
             const handleSaveToCloud = async (updated) => {
                 const base = normalizeGasUrl(gasUrl);
                 if (!base) {
-                    setErrorMsg("Set your Google Apps Script Web App URL in Settings → GAS URL tab.");
+                    setErrorMsg("尚未設定 Google Apps Script Web App URL，請到 Settings → GAS URL 分頁填入。");
                     return;
                 }
                 setSyncStatus('syncing');
@@ -1762,8 +1831,16 @@ function sanitizeLabels_(input) {
                 } catch (e) { setErrorMsg("Failed to save changes."); }
             };
 
-            useEffect(() => { fetchFromSheets(); }, [fetchFromSheets]);
-            useEffect(() => { fetchRemoteMeta(); }, [fetchRemoteMeta]);
+            // 這兩個請求必須依序發，不能並行：同時打 /exec 會讓 GAS 配發的一次性
+            // googleusercontent 網址互相作廢，在封鎖跨站 Cookie 的瀏覽器上會雙雙 404。
+            useEffect(() => {
+                let cancelled = false;
+                (async () => {
+                    await fetchFromSheets();
+                    if (!cancelled) await fetchRemoteMeta();
+                })();
+                return () => { cancelled = true; };
+            }, [fetchFromSheets, fetchRemoteMeta]);
 
             useEffect(() => {
                 document.title = effectiveChartTitle;
@@ -2090,15 +2167,14 @@ function sanitizeLabels_(input) {
                 }
                 setSettingsUrlError("");
                 try {
-                    const res = await fetch(normalized + "?t=" + Date.now());
-                    const data = await res.json();
+                    const data = await fetchGasJson(normalized, { retries: 1 });
                     if (Array.isArray(data)) {
                         setSettingsTestOk(`OK: received ${data.length} row(s) from this URL (not saved yet).`);
                     } else {
                         setSettingsUrlError("Connected but response was not a JSON array.");
                     }
                 } catch (e) {
-                    setSettingsUrlError("Fetch failed: check URL and Web App deployment (Anyone / signed-in).");
+                    setSettingsUrlError("連線失敗。請確認：① Apps Script 已部署支援 ?callback= 的最新版；②「誰可以存取」=「所有人」；③ 網址結尾為 /exec。");
                 }
             };
 
@@ -2441,8 +2517,12 @@ function sanitizeLabels_(input) {
                         {/* Center: logo + title + designer credit (showcase) */}
                         <div className="shrink-0 flex flex-col items-center text-center min-w-0 max-w-[60%]">
                             <div className="flex items-center gap-3 max-w-full">
-                                <div className={`p-1.5 rounded-md shrink-0 ${syncStatus === 'synced' ? 'bg-green-600' : 'bg-orange-500 animate-pulse'}`}
-                                    title={syncStatus === 'synced' ? 'Cloud synced — 雲端資料已同步' : 'Syncing… — 資料同步中'}>
+                                <div className={`p-1.5 rounded-md shrink-0 ${syncStatus === 'synced' ? 'bg-green-600' : syncStatus === 'error' ? 'bg-red-600' : 'bg-orange-500 animate-pulse'}`}
+                                    title={syncStatus === 'synced'
+                                        ? 'Cloud synced — 雲端資料已同步'
+                                        : syncStatus === 'error'
+                                            ? `Connection failed — ${errorMsg || '無法連線到雲端'}`
+                                            : 'Syncing… — 資料同步中'}>
                                     <Icon name="database" size={18} />
                                 </div>
                                 {(chartTitleLoaded || !normalizeGasUrl(gasUrl)) ? (
@@ -2567,6 +2647,31 @@ function sanitizeLabels_(input) {
                             ))}
                         </div>
                     </div>
+
+                    {/* 連線失敗橫幅：沒有這個，失敗時畫面只會是一張空的甘特圖，看不出原因 */}
+                    {syncStatus === 'error' && errorMsg && (
+                        <div className="px-4 py-2 bg-red-50 border-b-2 border-red-300 flex items-start gap-2.5 shrink-0 z-[400]">
+                            <span className="shrink-0 mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-600 text-white font-black text-[11px]">!</span>
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                                <div className="text-[11px] font-black text-red-800 uppercase tracking-wide">無法載入雲端資料</div>
+                                <p className="text-[10px] text-red-900 font-bold leading-relaxed break-words">{errorMsg}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openSettingsModal("gas")}
+                                className="shrink-0 px-3 py-1.5 bg-red-600 text-white font-black rounded-lg hover:bg-red-500 uppercase text-[10px] flex items-center gap-1"
+                            >
+                                <Icon name="settings" size={12} /> 檢查 GAS 設定
+                            </button>
+                            <button
+                                type="button"
+                                onClick={fetchFromSheets}
+                                className="shrink-0 px-3 py-1.5 bg-white text-red-700 border border-red-300 font-black rounded-lg hover:bg-red-100 uppercase text-[10px] flex items-center gap-1"
+                            >
+                                <Icon name="refresh-cw" size={12} /> 重試
+                            </button>
+                        </div>
+                    )}
 
                     {/* New Project Control */}
                     {isEditMode && (
@@ -3969,7 +4074,7 @@ function sanitizeLabels_(input) {
                                                                 <ul className="list-disc pl-5 mt-1 space-y-0.5">
                                                                     <li><strong>說明</strong>：任意（例如 <code className="bg-slate-100 px-1 rounded">v1</code>）。</li>
                                                                     <li><strong>執行身分</strong>：<code className="bg-slate-100 px-1 rounded">我（你的 Google 帳號）</code>。</li>
-                                                                    <li><strong>誰可以存取</strong>：<code className="bg-slate-100 px-1 rounded">所有人</code>。</li>
+                                                                    <li><strong>誰可以存取</strong>：<code className="bg-slate-100 px-1 rounded">所有人</code>。<strong className="text-red-700">不要選「具有 Google 帳戶的任何使用者」</strong>，那會讓沒登入 Google 的瀏覽器讀不到資料。</li>
                                                                 </ul>
                                                             </li>
                                                             <li>按 <code className="bg-slate-100 px-1 rounded">部署</code>。</li>
@@ -3977,7 +4082,7 @@ function sanitizeLabels_(input) {
                                                             <li>部署成功後對話框顯示「<strong>網頁應用程式網址</strong>」，複製它（結尾為 <code className="bg-slate-100 px-1 rounded">/exec</code>）。</li>
                                                         </ol>
                                                         <p className="text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-1.5 leading-relaxed">
-                                                            💡 之後若再修改 GAS 程式，記得回 <code className="bg-white px-1 rounded">部署 → 管理部署作業 → 編輯（鉛筆）→ 新版本 → 部署</code>，否則前端拿到的還是舊版。
+                                                            💡 之後若再修改 GAS 程式，記得回 <code className="bg-white px-1 rounded">部署 → 管理部署作業 → 編輯（鉛筆）→ 新版本 → 部署</code>，否則前端拿到的還是舊版。本版讀取改走 JSONP（<code className="bg-white px-1 rounded">?callback=</code>），可避開 Chrome / Edge 封鎖第三方 Cookie 導致讀不到資料的問題 — <strong>務必部署含此功能的最新程式碼</strong>。
                                                         </p>
                                                     </div>
 

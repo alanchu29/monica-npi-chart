@@ -52,7 +52,7 @@ Monica NPI 專案排程看板（單頁版），用甘特圖方式顯示各專案
 3. 填寫：
    - **說明**：任意（例如 `v1`）。
    - **執行身分**：`我（你的 Google 帳號）`。
-   - **誰可以存取**：選 `所有人`。
+   - **誰可以存取**：選 `所有人`。⚠️ 不要選「具有 Google 帳戶的任何使用者」，那會讓**沒有登入 Google 的瀏覽器讀不到資料**（詳見[常見問題](#常見問題) Q2-1）。
 4. 按 `部署`。
 5. **首次部署會跳出授權流程**：
    - `授權存取權` → 選擇你的 Google 帳號。
@@ -152,9 +152,13 @@ Monica NPI 專案排程看板（單頁版），用甘特圖方式顯示各專案
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
  *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules / Holidays 設定 + 編輯密碼）
+ *   - ?callback=fn：以 JSONP 包裝回傳（避開瀏覽器封鎖第三方 Cookie 時 fetch 讀不到 googleusercontent 轉址的問題）
  */
 function doGet(e) {
-  if (e && e.parameter && e.parameter.meta === '1') {
+  const params = (e && e.parameter) ? e.parameter : {};
+  let bodyText;
+
+  if (params.meta === '1') {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getActiveSheet();
     const props = PropertiesService.getDocumentProperties();
@@ -170,43 +174,58 @@ function doGet(e) {
     const editPasswordRaw = props.getProperty('editPassword');
     const editPassword = editPasswordRaw == null ? '' : String(editPasswordRaw);
 
-    const payload = {
+    bodyText = JSON.stringify({
       title: ss.getName(),
       sheetName: sheet.getName(),
       labels: labels,
       editPassword: editPassword,
       updatedAt: new Date().toISOString()
-    };
-    return ContentService.createTextOutput(JSON.stringify(payload))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-
-  if (data.length <= 1) {
-    return ContentService.createTextOutput(JSON.stringify([]))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  const headers = data.shift();
-  const json = data.map(row => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      if (row[i] instanceof Date) {
-        const d = row[i];
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        obj[h] = `${year}-${month}-${day}`;
-      } else {
-        obj[h] = row[i];
-      }
     });
-    return obj;
-  });
+  } else {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const data = sheet.getDataRange().getValues();
 
-  return ContentService.createTextOutput(JSON.stringify(json))
+    if (data.length <= 1) {
+      bodyText = '[]';
+    } else {
+      const headers = data.shift();
+      const json = data.map(function (row) {
+        const obj = {};
+        headers.forEach(function (h, i) {
+          if (row[i] instanceof Date) {
+            const d = row[i];
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            obj[h] = year + '-' + month + '-' + day;
+          } else {
+            obj[h] = row[i];
+          }
+        });
+        return obj;
+      });
+      bodyText = JSON.stringify(json);
+    }
+  }
+
+  return respondJson_(bodyText, params.callback);
+}
+
+/** 只允許簡單識別字當 JSONP callback，避免把任意字串寫進腳本。 */
+function sanitizeCallback_(name) {
+  const s = String(name == null ? '' : name);
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]{0,80}$/.test(s)) return '';
+  return s;
+}
+
+/** 有合法 callback → JSONP；否則維持原本的 raw JSON（網址列直接開 /exec 仍可用）。 */
+function respondJson_(jsonText, callback) {
+  const cb = sanitizeCallback_(callback);
+  if (cb) {
+    return ContentService.createTextOutput(cb + '(' + jsonText + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(jsonText)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -337,7 +356,6 @@ function sanitizeLabels_(input) {
     });
   }
 
-  // resourceRules: [{ id, name, enabled, seriesScope, phaseKeys, maxConcurrent }]
   if (Array.isArray(input.resourceRules)) {
     const seenIds = {};
     out.resourceRules = [];
@@ -588,10 +606,37 @@ function sanitizeLabels_(input) {
 A. Apps Script 改完要「重新部署」：右上角 `部署 → 管理部署作業 → 編輯（鉛筆）→ 新版本 → 部署`。**不能只按儲存。**
 
 **Q2. 我貼了 URL 但連不上？**
-A. 確認三件事：
-1. URL 結尾必須是 `/exec`，不是 `/dev`（`/dev` 只給編輯者本人測試）。
-2. Step 3 的 `誰可以存取` 是否設成「任何人」或「任何 Google 帳號」。如果是「只有我」，其他帳號就會 403。
-3. 是否完成了首次授權流程（允許讀寫試算表）。
+A. 依照發生機率由高到低確認：
+1. **Apps Script 還沒部署支援 JSONP 的最新版** — 前端讀取已改走 `?callback=`（詳見 Q2-2）。請到 Settings → GAS URL 複製程式碼重貼，再「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。
+2. URL 結尾必須是 `/exec`，不是 `/dev`（`/dev` 只給編輯者本人測試，別人一定連不上）。
+3. Step 3 的 `誰可以存取` 必須是 **`所有人`**。詳見 Q2-1。
+4. 是否完成了首次授權流程（允許讀寫試算表）。
+
+**Q2-1. 在沒有登入 Google 帳號的瀏覽器上就讀不到資料？**
+A. 這是部署設定的 `誰可以存取` 選錯了。Google 這個下拉選單有三個選項，差別很大：
+
+| 選項 | 未登入 Google 的瀏覽器 |
+|---|---|
+| `只有我自己` | ❌ 連你自己在別的瀏覽器都不行 |
+| `具有 Google 帳戶的任何使用者` | ❌ **會被導去登入頁，抓不到資料** |
+| `所有人` | ✅ 可以 |
+
+**要在未登入的瀏覽器使用，必須選「所有人」**。名字看起來很嚇人，但「執行身分」維持 `我` 的話，腳本仍然是以你的權限去讀寫你自己那張試算表，Google 不會把試算表本身公開；真正的風險是**任何拿到這個 `/exec` 網址的人都能讀寫這份資料**，所以網址請當成密碼看待，需要時再到 Settings → Admin 設一組編輯密碼。
+
+改法：Apps Script → `部署 → 管理部署作業 → 編輯（鉛筆）` → 把 `誰可以存取` 改成 `所有人` → `部署`。**URL 不會變**，前端不用重貼。
+
+如果下拉選單裡根本沒有「所有人」這個選項，代表你用的是公司 / 學校的 Google Workspace 帳號，網域管理員限制了對外公開。這種情況只能改用個人 Google 帳號重新建立試算表與 Apps Script，或請管理員放寬政策。
+
+**Q2-2. Chrome / Edge 某些設定下讀不到資料？為什麼不用改瀏覽器設定了？**
+A. 根因是 Apps Script 的 ContentService 會 302 到 `script.googleusercontent.com`。用 `fetch` 讀取時，Chrome 封鎖第三方 Cookie、Edge 追蹤防護都會讓這段轉址失敗（Console 出現 `Tracking Prevention blocked…` + 404）。
+
+**徹底解法（已內建）**：前端讀取改走 **JSONP**（`<script src="…/exec?callback=…">`），不再依賴第三方 Cookie / CORS。後端 `doGet` 看到合法 `callback` 參數時會回 `callbackName(json)`。**寫入（POST）本來就是 `no-cors` 送出，不受此問題影響。**
+
+你需要做的只有一件事：把最新 Apps Script 貼上並「新版本」部署（URL 不變）。部署完成後，Chrome / Edge / 無痕視窗都不必再改追蹤防護例外。
+
+若部署後仍失敗：按 `F12` 看 Console；若還在用舊版 GAS（不認得 `callback`），JSONP 會 timeout，畫面會提示你更新程式碼。
+
+> 順帶一提：直接在網址列開 `/exec`（不加 `callback`）仍會回 raw JSON，方便人工檢查。被轉址後那串 `googleusercontent.com` 網址是一次性的，在那頁按重新整理看到「無法開啟這個檔案」是正常的。
 
 **Q3. 試算表突然被清空 / 多筆資料消失？**
 A. 每次儲存會 `sheet.clear()` 整張清空後重寫，所以**不能與其他資料共用同一個 sheet 分頁**。另外只認 `getActiveSheet()`，多分頁時要確認操作的是「打開試算表預設顯示的那個分頁」。
