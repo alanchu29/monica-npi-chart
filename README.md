@@ -152,63 +152,72 @@ Monica NPI 專案排程看板（單頁版），用甘特圖方式顯示各專案
  * 處理 GET 請求：
  *   - 預設：從表格讀取專案資料（JSON 陣列）
  *   - ?meta=1：回傳試算表 metadata（甘特圖標題 + Series / Phase / Site / Resource Rules / Holidays 設定 + 編輯密碼）
+ *   - ?bundle=1：一次回傳 { tasks, title, sheetName, labels, editPassword, updatedAt }（首屏只打一趟，避免串行兩次冷啟動）
  *   - ?callback=fn：以 JSONP 包裝回傳（避開瀏覽器封鎖第三方 Cookie 時 fetch 讀不到 googleusercontent 轉址的問題）
  */
 function doGet(e) {
   const params = (e && e.parameter) ? e.parameter : {};
   let bodyText;
 
-  if (params.meta === '1') {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getActiveSheet();
-    const props = PropertiesService.getDocumentProperties();
-
-    let labels = null;
-    try {
-      const raw = props.getProperty('labels');
-      if (raw) labels = JSON.parse(raw);
-    } catch (err) {
-      labels = null;
-    }
-
-    const editPasswordRaw = props.getProperty('editPassword');
-    const editPassword = editPasswordRaw == null ? '' : String(editPasswordRaw);
-
-    bodyText = JSON.stringify({
-      title: ss.getName(),
-      sheetName: sheet.getName(),
-      labels: labels,
-      editPassword: editPassword,
-      updatedAt: new Date().toISOString()
-    });
+  if (params.bundle === '1') {
+    const meta = readMetaPayload_();
+    meta.tasks = readTasksPayload_();
+    bodyText = JSON.stringify(meta);
+  } else if (params.meta === '1') {
+    bodyText = JSON.stringify(readMetaPayload_());
   } else {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const data = sheet.getDataRange().getValues();
-
-    if (data.length <= 1) {
-      bodyText = '[]';
-    } else {
-      const headers = data.shift();
-      const json = data.map(function (row) {
-        const obj = {};
-        headers.forEach(function (h, i) {
-          if (row[i] instanceof Date) {
-            const d = row[i];
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            obj[h] = year + '-' + month + '-' + day;
-          } else {
-            obj[h] = row[i];
-          }
-        });
-        return obj;
-      });
-      bodyText = JSON.stringify(json);
-    }
+    bodyText = JSON.stringify(readTasksPayload_());
   }
 
   return respondJson_(bodyText, params.callback);
+}
+
+function readMetaPayload_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet();
+  const props = PropertiesService.getDocumentProperties();
+
+  let labels = null;
+  try {
+    const raw = props.getProperty('labels');
+    if (raw) labels = JSON.parse(raw);
+  } catch (err) {
+    labels = null;
+  }
+
+  const editPasswordRaw = props.getProperty('editPassword');
+  const editPassword = editPasswordRaw == null ? '' : String(editPasswordRaw);
+
+  return {
+    title: ss.getName(),
+    sheetName: sheet.getName(),
+    labels: labels,
+    editPassword: editPassword,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function readTasksPayload_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+
+  const headers = data.shift();
+  return data.map(function (row) {
+    const obj = {};
+    headers.forEach(function (h, i) {
+      if (row[i] instanceof Date) {
+        const d = row[i];
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        obj[h] = year + '-' + month + '-' + day;
+      } else {
+        obj[h] = row[i];
+      }
+    });
+    return obj;
+  });
 }
 
 /** 只允許簡單識別字當 JSONP callback，避免把任意字串寫進腳本。 */
@@ -607,7 +616,7 @@ A. Apps Script 改完要「重新部署」：右上角 `部署 → 管理部署�
 
 **Q2. 我貼了 URL 但連不上？**
 A. 依照發生機率由高到低確認：
-1. **Apps Script 還沒部署支援 JSONP 的最新版** — 前端讀取已改走 `?callback=`（詳見 Q2-2）。請到 Settings → GAS URL 複製程式碼重貼，再「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。
+1. **Apps Script 還沒部署支援 JSONP / `?bundle=1` 的最新版** — 前端讀取已改走 `?callback=`，首屏一次帶回 tasks+設定（詳見 Q2-2）。請到 Settings → GAS URL 複製程式碼重貼，再「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。
 2. URL 結尾必須是 `/exec`，不是 `/dev`（`/dev` 只給編輯者本人測試，別人一定連不上）。
 3. Step 3 的 `誰可以存取` 必須是 **`所有人`**。詳見 Q2-1。
 4. 是否完成了首次授權流程（允許讀寫試算表）。
@@ -630,7 +639,7 @@ A. 這是部署設定的 `誰可以存取` 選錯了。Google 這個下拉選單
 **Q2-2. Chrome / Edge 某些設定下讀不到資料？為什麼不用改瀏覽器設定了？**
 A. 根因是 Apps Script 的 ContentService 會 302 到 `script.googleusercontent.com`。用 `fetch` 讀取時，Chrome 封鎖第三方 Cookie、Edge 追蹤防護都會讓這段轉址失敗（Console 出現 `Tracking Prevention blocked…` + 404）。
 
-**徹底解法（已內建）**：前端讀取改走 **JSONP**（`<script src="…/exec?callback=…">`），不再依賴第三方 Cookie / CORS。後端 `doGet` 看到合法 `callback` 參數時會回 `callbackName(json)`。**寫入（POST）本來就是 `no-cors` 送出，不受此問題影響。**
+**徹底解法（已內建）**：前端讀取改走 **JSONP**（`<script src="…/exec?callback=…">`），不再依賴第三方 Cookie / CORS。後端 `doGet` 看到合法 `callback` 參數時會回 `callbackName(json)`。首屏另用 **`?bundle=1`** 一次帶回 tasks + metadata，避免串行打兩趟 GAS 冷啟動。**寫入（POST）本來就是 `no-cors` 送出，不受此問題影響。**
 
 你需要做的只有一件事：把最新 Apps Script 貼上並「新版本」部署（URL 不變）。部署完成後，Chrome / Edge / 無痕視窗都不必再改追蹤防護例外。
 
